@@ -6,31 +6,20 @@
 module LocalCooking.Function.Mitch where
 
 import LocalCooking.Semantics.Mitch (Customer (..))
-import LocalCooking.Semantics.Common (User (..), Login (..), SocialLoginForm (..), Register (..))
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
-import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess)
-import LocalCooking.Common.AccessToken (genAccessToken)
+import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Database.Query.IngredientDiet (getDietId, getStoredIngredientId)
-import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
-import LocalCooking.Database.Schema.User (StoredUser (..), EntityField (StoredUserEmail, StoredUserPassword, StoredUserCreated), Unique (UniqueEmail))
-import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
-import LocalCooking.Database.Schema.User.Pending (PendingRegistrationConfirm (..), Unique (UniquePendingRegistration))
 import LocalCooking.Database.Schema.User.Customer (StoredDietPreference (..), EntityField (StoredDietPreferenceDietPreferenceOwner, StoredDietPreferenceDietPreferenceDiet, StoredCustomerStoredCustomerAddress, StoredCustomerStoredCustomerName, StoredAllergyAllergy, StoredAllergyAllergyOwner), StoredCustomer (..), StoredAllergy (..), Unique (UniqueCustomer))
-import Facebook.Types (FacebookLoginCode, FacebookUserId)
-import Facebook.Return (FacebookLoginReturnError, handleFacebookLoginReturn)
 
-import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef)
 import qualified Data.Set as Set
-import Data.Time (getCurrentTime)
 import Data.Maybe (catMaybes)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
-import Control.Newtype (Newtype (pack))
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, deleteWhere, update, get)
+import Database.Persist.Class (selectList, getBy, insert, insert_, deleteWhere, update)
 
 
 setCustomer :: AuthToken -> Customer -> AppM Bool

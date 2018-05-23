@@ -13,7 +13,7 @@ import LocalCooking.Database.Schema.User (StoredUser (..), EntityField (StoredUs
 import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
 import LocalCooking.Database.Schema.User.Pending (PendingRegistrationConfirm (..), Unique (UniquePendingRegistration))
 
-import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef)
+import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set
 import Data.Time (getCurrentTime)
 import Control.Monad (forM, forM_)

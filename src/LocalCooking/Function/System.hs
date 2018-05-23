@@ -63,8 +63,8 @@ execAppM args x = bracket build release $ \(env,_,_) -> runReaderT x env
           thread1 <- async $ expireThread (3600 * second) auth
           thread2 <- async $ expireThread (3600 * second) email
           pure (env,thread1,thread2)
-    release (SystemEnv{systemEnvDatabase},thread1,thread2) = do
-      destroyAllResources systemEnvDatabase
+    release (env,thread1,thread2) = do
+      releaseSystemEnv env
       cancel thread1
       cancel thread2
 

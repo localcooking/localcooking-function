@@ -39,9 +39,7 @@ instance FromJSON GoogleCredentials where
     Object o -> GoogleCredentials <$> o .: "analytics"
                                   <*> o .: "reCaptcha"
                                   <*> o .: "reCaptchaSecret"
-    _ -> fail
-    where
-      fail = typeMismatch "GoogleCredentials" json
+    _ -> typeMismatch "GoogleCredentials" json
 
 
 -- * Analytics

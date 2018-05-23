@@ -14,11 +14,6 @@ import Data.ByteString (ByteString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Data.URI (URI (..))
-import Data.URI.Auth (URIAuth (..))
-import Data.URI.Auth.Host (URIAuthHost (Host))
-import qualified Data.Strict.Maybe as Strict
-import Data.Strict.Tuple (Pair (..))
 import Text.EmailAddress (EmailAddress)
 import Network.HTTP.Client (Request, parseRequest, requestHeaders, requestBody, RequestBody (RequestBodyLBS), method)
 
