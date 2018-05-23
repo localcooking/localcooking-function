@@ -10,6 +10,7 @@ import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Database.Query.IngredientDiet (getDietId, getStoredIngredientId)
+import LocalCooking.Database.Query.Tag.Chef (getChefTagById)
 import LocalCooking.Database.Schema.User.Customer (StoredDietPreference (..), EntityField (StoredDietPreferenceDietPreferenceOwner, StoredDietPreferenceDietPreferenceDiet, StoredCustomerStoredCustomerAddress, StoredCustomerStoredCustomerName, StoredAllergyAllergy, StoredAllergyAllergyOwner), StoredCustomer (..), StoredAllergy (..), Unique (UniqueCustomer))
 
 import qualified Data.Set as Set
@@ -83,4 +84,26 @@ setCustomer authToken Customer{..} = do
 
 browseChef :: Permalink -> AppM (Maybe Chef)
 browseChef chefPermalink = do
-  undefined
+  SystemEnv{systemEnvDatabase} <- ask
+
+  flip runSqlPool systemEnvDatabase $ do
+    mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
+    case mChefEnt of
+      Nothing -> pure Nothing
+      Just (Entity chefId (StoredChef _ name permalink bio images _)) -> do
+        tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
+        tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
+          liftIO (getChefTagById systemEnvDatabase tagId)
+
+        pure $ Just Chef
+          { chefName = name
+          , chefPermalink = permalink
+          , chefImages = images
+          , chefBio = bio
+          , chefRating = _
+          , chefReviews = _
+          , chefActiveOrders = _
+          , chefTotalOrders = _
+          , chefTags = tags
+          , chefMenus = _
+          }
