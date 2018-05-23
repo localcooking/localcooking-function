@@ -27,6 +27,7 @@ dependencies:
 - aeson
 - attoparsec-uri >= 0.0.4
 - bytestring
+- containers
 - data-default
 - emailaddress >= 0.2.0.1
 - hashable
