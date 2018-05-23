@@ -25,6 +25,7 @@ dependencies:
 - localcooking-db
 - base >= 4.7 && < 5
 - aeson
+- async
 - attoparsec-uri >= 0.0.4
 - bytestring
 - containers

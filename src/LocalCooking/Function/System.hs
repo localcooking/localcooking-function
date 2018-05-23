@@ -15,7 +15,7 @@ module LocalCooking.Function.System
   , Keys (..)
   ) where
 
-import LocalCooking.Function.System.AccessToken (AccessTokenContext, newAccessTokenContext)
+import LocalCooking.Function.System.AccessToken (AccessTokenContext, newAccessTokenContext, expireThread)
 import LocalCooking.Common.AccessToken.Email (EmailToken)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Password (HashedPassword)
@@ -33,11 +33,13 @@ import qualified Data.HashMap.Strict as HashMap
 import Data.Pool (destroyAllResources)
 import Data.Monoid ((<>))
 import Data.Text (Text)
+import Data.Time.Clock (secondsToDiffTime)
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.UTF8 as BS8
 import Control.Monad.Logger (runStderrLoggingT)
 import Control.Monad.Reader (ReaderT (runReaderT))
 import Control.Exception (bracket)
+import Control.Concurrent.Async (async, cancel)
 import Control.Concurrent.STM (STM, atomically, TVar, newTVarIO)
 import Database.Persist.Sql (ConnectionPool)
 import Database.Persist.Postgresql (createPostgresqlPool)
@@ -51,7 +53,20 @@ import System.IO.Unsafe (unsafePerformIO)
 type AppM = ReaderT SystemEnv IO
 
 execAppM :: NewSystemEnvArgs -> AppM a -> IO a
-execAppM args x = bracket (newSystemEnv args) releaseSystemEnv (runReaderT x)
+execAppM args x = bracket build release $ \(env,_,_) -> runReaderT x env
+  where
+    build = do
+      env@SystemEnv{systemEnvTokenContexts} <- newSystemEnv args
+      case systemEnvTokenContexts of
+        TokenContexts auth email -> do
+          let second = fromRational $ toRational $ secondsToDiffTime 1
+          thread1 <- async $ expireThread (3600 * second) auth
+          thread2 <- async $ expireThread (3600 * second) email
+          pure (env,thread1,thread2)
+    release (SystemEnv{systemEnvDatabase},thread1,thread2) = do
+      destroyAllResources systemEnvDatabase
+      cancel thread1
+      cancel thread2
 
 
 
