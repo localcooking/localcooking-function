@@ -5,13 +5,28 @@
 
 module LocalCooking.Function.Mitch where
 
-import LocalCooking.Semantics.Mitch (Customer (..), Chef (..))
+import LocalCooking.Semantics.Mitch (Customer (..), Chef (..), MenuSynopsis (..))
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Database.Query.IngredientDiet (getDietId, getStoredIngredientId)
 import LocalCooking.Database.Query.Tag.Chef (getChefTagById)
-import LocalCooking.Database.Schema.User.Customer (StoredDietPreference (..), EntityField (StoredDietPreferenceDietPreferenceOwner, StoredDietPreferenceDietPreferenceDiet, StoredCustomerStoredCustomerAddress, StoredCustomerStoredCustomerName, StoredAllergyAllergy, StoredAllergyAllergyOwner), StoredCustomer (..), StoredAllergy (..), Unique (UniqueCustomer))
+import LocalCooking.Database.Query.Tag.Meal (getMealTagById)
+import LocalCooking.Database.Schema.User.Customer
+  ( StoredDietPreference (..)
+  , StoredCustomer (..), StoredAllergy (..)
+  , EntityField
+    ( StoredDietPreferenceDietPreferenceOwner
+    , StoredDietPreferenceDietPreferenceDiet, StoredCustomerStoredCustomerAddress
+    , StoredCustomerStoredCustomerName
+    , StoredAllergyAllergy, StoredAllergyAllergyOwner
+    )
+  , Unique (UniqueCustomer))
+import LocalCooking.Database.Schema.Semantics
+  ( StoredMenu (..), StoredChefId
+  , MenuTagRelation (..)
+  , EntityField (MenuTagRelationMenuTagMenu, StoredMenuStoredMenuAuthor)
+  )
 
 import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
@@ -82,28 +97,50 @@ setCustomer authToken Customer{..} = do
 
 
 
-browseChef :: Permalink -> AppM (Maybe Chef)
-browseChef chefPermalink = do
+getChefMenu :: StoredChefId -> AppM [MenuSynopsis]
+getChefMenu chefId = do
   SystemEnv{systemEnvDatabase} <- ask
 
   flip runSqlPool systemEnvDatabase $ do
-    mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
-    case mChefEnt of
-      Nothing -> pure Nothing
-      Just (Entity chefId (StoredChef _ name permalink bio images _)) -> do
-        tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
-        tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
-          liftIO (getChefTagById systemEnvDatabase tagId)
+    xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
+    fmap catMaybes $ forM xs $ \(Entity k (StoredMenu published deadline heading _ images _)) -> do
+      case published of
+        Nothing -> pure Nothing
+        Just p -> do
+          tagIds <- fmap (fmap (\(Entity _ (MenuTagRelation _ t)) -> t)) $ selectList [MenuTagRelationMenuTagMenu ==. k] []
+          tags <- fmap catMaybes $ forM tagIds $ \tagId -> liftIO (getMealTagById systemEnvDatabase tagId)
+          pure $ Just MenuSynopsis
+            { menuSynopsisPublished = p
+            , menuSynopsisDeadline = deadline
+            , menuSynopsisHeading = heading
+            , menuSynopsisTags = tags
+            , menuSynopsisImages = images
+            }
 
-        pure $ Just Chef
-          { chefName = name
-          , chefPermalink = permalink
-          , chefImages = images
-          , chefBio = bio
-          , chefRating = _
-          , chefReviews = _
-          , chefActiveOrders = _
-          , chefTotalOrders = _
-          , chefTags = tags
-          , chefMenus = _
-          }
+
+
+-- browseChef :: Permalink -> AppM (Maybe Chef)
+-- browseChef chefPermalink = do
+--   SystemEnv{systemEnvDatabase} <- ask
+
+--   flip runSqlPool systemEnvDatabase $ do
+--     mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
+--     case mChefEnt of
+--       Nothing -> pure Nothing
+--       Just (Entity chefId (StoredChef _ name permalink bio images _)) -> do
+--         tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
+--         tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
+--           liftIO (getChefTagById systemEnvDatabase tagId)
+
+--         pure $ Just Chef
+--           { chefName = name
+--           , chefPermalink = permalink
+--           , chefImages = images
+--           , chefBio = bio
+--           , chefRating = _
+--           , chefReviews = _
+--           , chefActiveOrders = _
+--           , chefTotalOrders = _
+--           , chefTags = tags
+--           , chefMenus = _
+--           }
