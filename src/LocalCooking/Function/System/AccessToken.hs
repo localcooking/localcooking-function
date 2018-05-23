@@ -12,26 +12,17 @@
 module LocalCooking.Function.System.AccessToken where
 
 import LocalCooking.Common.AccessToken (AccessToken, genAccessToken)
--- import Web.Dependencies.Sparrow.Types (Server, ServerContinue (..), ServerReturn (..), ServerArgs (..))
 
 import Data.Hashable (Hashable)
 import Data.Time (NominalDiffTime)
 import Data.TimeMap (TimeMap, newTimeMap)
 import qualified Data.TimeMap as TimeMap
--- import Data.Singleton.Class (Extractable (runSingleton))
-import Data.Aeson (FromJSON (..), ToJSON (..), (.:), (.=), object, Value (String, Object))
-import Data.Aeson.Types (typeMismatch)
--- import Data.Insert.Class (Insertable (insert))
-import Control.Applicative (Alternative (empty))
 import Control.Monad (forM_, forever)
--- import qualified Control.Monad.Trans.Control.Aligned as Aligned
-import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (async)
-import Control.Concurrent.STM (STM, atomically, newTVarIO)
+import Control.Concurrent.STM (STM, atomically)
 import Control.Concurrent.STM.TMapMVar.Hash (TMapMVar, newTMapMVar)
 import qualified Control.Concurrent.STM.TMapMVar.Hash as TMapMVar
-import Control.Newtype (Newtype (pack, unpack))
+import Control.Newtype (Newtype (pack))
 
 
 

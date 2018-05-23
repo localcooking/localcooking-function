@@ -25,18 +25,19 @@ dependencies:
 - localcooking-db
 - base >= 4.7 && < 5
 - aeson
-- async
 - attoparsec-uri >= 0.0.4
 - bytestring
 - data-default
 - emailaddress >= 0.2.0.1
-# - extractable-singleton
 - hashable
 - http-client
 - http-client-tls
-# - monad-control-aligned
+- monad-logger
+- mtl
 - newtype
 - persistent
+- persistent-postgresql
+- resource-pool
 - stm
 - strict
 - text
@@ -44,6 +45,7 @@ dependencies:
 - timemap >= 0.0.7
 - tmapmvar
 - unordered-containers
+- utf8-string
 
 library:
   source-dirs: src
