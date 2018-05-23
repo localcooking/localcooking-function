@@ -5,7 +5,7 @@
 
 module LocalCooking.Function.Mitch where
 
-import LocalCooking.Semantics.Mitch (Customer (..))
+import LocalCooking.Semantics.Mitch (Customer (..), Chef (..))
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -14,6 +14,7 @@ import LocalCooking.Database.Schema.User.Customer (StoredDietPreference (..), En
 
 import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
+import Data.Text.Permalink (Permalink)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
@@ -77,3 +78,9 @@ setCustomer authToken Customer{..} = do
               forM_ toAdd $ \i -> insert_ (StoredAllergy custId i)
 
               pure True
+
+
+
+browseChef :: Permalink -> AppM (Maybe Chef)
+browseChef chefPermalink = do
+  undefined
