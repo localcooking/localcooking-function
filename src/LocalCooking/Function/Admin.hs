@@ -5,22 +5,23 @@
 
 module LocalCooking.Function.Admin where
 
-import LocalCooking.Semantics.Admin (GetUsers (..), SetUser (..))
-import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..))
+import LocalCooking.Semantics.Admin (GetUsers (..), SetUser (..), AddUser (..))
+import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..), Register (..))
 import LocalCooking.Function.System (AppM, SystemEnv (..))
 import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
-import LocalCooking.Database.Schema.User (StoredUser (..), EntityField (StoredUserEmail, StoredUserPassword, StoredUserCreated))
+import LocalCooking.Database.Schema.User (StoredUser (..), EntityField (StoredUserEmail, StoredUserPassword, StoredUserCreated), Unique (UniqueEmail))
 import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
 import LocalCooking.Database.Schema.User.Pending (PendingRegistrationConfirm (..), Unique (UniquePendingRegistration))
 
 import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef)
 import qualified Data.Set as Set
+import Data.Time (getCurrentTime)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, getBy, insert_, delete, deleteBy, update)
+import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, update)
 
 
 
@@ -80,3 +81,23 @@ setUser (SetUser User{..}) = do
         else delete k
     rolesLeft <- liftIO (readIORef rolesRef)
     forM_ rolesLeft $ \role -> insert_ (UserRoleStored role userId)
+
+
+
+addUser :: AddUser -> AppM Bool
+addUser (AddUser Register{..}) = do
+  SystemEnv{systemEnvDatabase} <- ask
+
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    mEnt <- getBy (UniqueEmail registerEmail)
+    case mEnt of
+      Just _ -> pure False
+      Nothing -> do
+        now <- liftIO getCurrentTime
+        k <- insert (StoredUser now registerEmail registerPassword)
+        case registerSocial of
+          SocialLoginForm mFb -> do
+            case mFb of
+              Nothing -> pure ()
+              Just userFb -> insert_ (FacebookUserDetails userFb k)
+        pure True
