@@ -20,21 +20,33 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/githubuser/localcooking-function#readme>
 
 dependencies:
+- localcooking-shared
+- localcooking-fb
+- localcooking-db
 - base >= 4.7 && < 5
+- aeson
+- async
+- attoparsec-uri >= 0.0.4
+- bytestring
+- data-default
+- emailaddress >= 0.2.0.1
+# - extractable-singleton
+- hashable
+- http-client
+- http-client-tls
+# - monad-control-aligned
+- newtype
+- persistent
+- stm
+- strict
+- text
+- time
+- timemap >= 0.0.7
+- tmapmvar
+- unordered-containers
 
 library:
   source-dirs: src
-
-executables:
-  localcooking-function-exe:
-    main:                Main.hs
-    source-dirs:         app
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - localcooking-function
 
 tests:
   localcooking-function-test:

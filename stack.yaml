@@ -38,6 +38,10 @@ packages:
 - ../localcooking-shared/
 - ../localcooking-db/
 - ../localcooking-fb/
+- location:
+    git: git@git.localcooking.com:private-tooling/emailaddress.git
+    commit: 31540c8305e0db6b98dcc1beb79afd1e9ed35bb8
+  extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
@@ -45,6 +49,7 @@ extra-deps:
 - aeson-attoparsec-0.0.0
 - attoparsec-base64-0.0.0
 - saltine-0.1.0.0
+- timemap-0.0.7
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
