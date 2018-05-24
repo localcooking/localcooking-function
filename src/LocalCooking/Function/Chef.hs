@@ -13,7 +13,7 @@ import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema.Semantics
-  ( StoredChef (..), ChefTagRelation (..)
+  ( StoredChef (..), ChefTagRelation (..), StoredChefId
   , EntityField
     ( StoredChefStoredChefName, StoredChefStoredChefPermalink
     , StoredChefStoredChefImages, StoredChefStoredChefAvatar
@@ -69,7 +69,7 @@ addChefTag authToken tag = do
 
 
 
-setChef :: AuthToken -> ChefSettings -> AppM Bool
+setChef :: AuthToken -> ChefSettings -> AppM (Maybe StoredChefId)
 setChef authToken ChefSettings{..} = do
   SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
 
@@ -77,11 +77,11 @@ setChef authToken ChefSettings{..} = do
     TokenContexts{tokenContextAuth} -> do
       mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
       case mUserId of
-        Nothing -> pure False
+        Nothing -> pure Nothing
         Just k -> do
           isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
           if not isAuthorized
-            then pure False
+            then pure Nothing
             else flip runSqlPool systemEnvDatabase $ do
               mChefEnt <- getBy (UniqueChefOwner k)
               case mChefEnt of
@@ -98,7 +98,7 @@ setChef authToken ChefSettings{..} = do
                     case mChefTagId of
                       Nothing -> pure ()
                       Just chefTagId -> insert_ (ChefTagRelation chefId chefTagId)
-                  pure True
+                  pure (Just chefId)
                 Just (Entity chefId _) -> do
                   update chefId
                     [ StoredChefStoredChefName =. chefSettingsName
@@ -122,4 +122,4 @@ setChef authToken ChefSettings{..} = do
                   forM_ toAdd $ \t ->
                     insert_ (ChefTagRelation chefId t)
 
-                  pure True
+                  pure (Just chefId)
