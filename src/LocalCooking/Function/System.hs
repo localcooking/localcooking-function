@@ -54,20 +54,26 @@ import System.IO.Unsafe (unsafePerformIO)
 type AppM = ReaderT SystemEnv IO
 
 execAppM :: NewSystemEnvArgs -> AppM a -> IO a
-execAppM args x = bracket build release $ \(env,_,_) -> runReaderT x env
+execAppM args x = bracket build release $ \(env,_,_,_) -> runReaderT x env
   where
     build = do
-      env@SystemEnv{systemEnvTokenContexts} <- newSystemEnv args
+      env@SystemEnv
+        { systemEnvTokenContexts
+        , systemEnvReviews
+        , systemEnvDatabase
+        } <- newSystemEnv args
       case systemEnvTokenContexts of
         TokenContexts auth email -> do
           let second = fromRational $ toRational $ secondsToDiffTime 1
           thread1 <- async $ expireThread (3600 * second) auth
           thread2 <- async $ expireThread (3600 * second) email
-          pure (env,thread1,thread2)
-    release (env,thread1,thread2) = do
+          thread3 <- async $ calculateThread systemEnvDatabase systemEnvReviews
+          pure (env,thread1,thread2,thread3)
+    release (env,thread1,thread2,thread3) = do
       releaseSystemEnv env
       cancel thread1
       cancel thread2
+      cancel thread3
 
 
 

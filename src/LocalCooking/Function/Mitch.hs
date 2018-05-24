@@ -159,7 +159,7 @@ browseChef chefPermalink = do
       mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
       case mReviews of
         Nothing -> pure Nothing
-        Just (rating,reviews) -> do
+        Just (rating,reviews) ->
           pure $ Just Chef
             { chefName = name
             , chefPermalink = permalink
