@@ -128,7 +128,7 @@ setCustomer authToken Customer{..} = do
 
 getReview :: StoredReviewId -> AppM (Maybe Review)
 getReview reviewId = do
-  SystemEnv{systemEnvDatabase,systemEnvReviews} <- ask
+  SystemEnv{systemEnvDatabase} <- ask
 
   flip runSqlPool systemEnvDatabase $ do
     mReview <- get reviewId
@@ -157,7 +157,7 @@ getMealIngredientsDiets mealId = do
       Just _ -> do
         xs <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
         ( ings
-          , (ds :: [Set.Set Diet])
+          , ds :: [Set.Set Diet]
           ) <- fmap (unzip . catMaybes) $ forM xs $ \(Entity _ (MealIngredient _ ingId)) -> liftIO $ do
           mIng <- liftIO (getIngredientNameById systemEnvDatabase ingId)
           case mIng of
@@ -183,7 +183,6 @@ getMealSynopsis mealId = do
           ings <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
           fmap concat $ forM ings $ \(Entity _ (MealIngredient _ ingId)) ->
             liftIO (getIngredientViolations systemEnvDatabase ingId)
-        now <- liftIO getCurrentTime
         orders <- count
           [ StoredOrderStoredOrderMeal ==. mealId
           , StoredOrderStoredOrderProgress !=. DeliveredProgress
@@ -199,7 +198,7 @@ getMealSynopsis mealId = do
       mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
       case mRating of
         Nothing -> pure Nothing
-        Just rating -> do
+        Just rating ->
           pure $ Just MealSynopsis
             { mealSynopsisTitle = title
             , mealSynopsisPermalink = permalink
@@ -233,7 +232,7 @@ getChefSynopsis chefId = do
       mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
       case mReviews of
         Nothing -> pure Nothing
-        Just (rating,_) -> do
+        Just (rating,_) ->
           pure $ Just ChefSynopsis
             { chefSynopsisName = name
             , chefSynopsisPermalink = permalink
@@ -250,7 +249,7 @@ getChefMenuSynopses chefId = do
 
   flip runSqlPool systemEnvDatabase $ do
     xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
-    fmap catMaybes $ forM xs $ \(Entity k (StoredMenu published deadline heading _ images _)) -> do
+    fmap catMaybes $ forM xs $ \(Entity k (StoredMenu published deadline heading _ images _)) ->
       case published of
         Nothing -> pure Nothing
         Just p -> do
@@ -324,7 +323,7 @@ browseChef chefPermalink = do
 
 browseMenu :: Permalink -> Day -> AppM (Maybe Menu)
 browseMenu chefPermalink deadline = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+  SystemEnv{systemEnvDatabase} <- ask
 
   mMenuDeets <- liftIO $ flip runSqlPool systemEnvDatabase $ do
     mChef <- getBy (UniqueChefPermalink chefPermalink)
@@ -334,7 +333,7 @@ browseMenu chefPermalink deadline = do
         mMenu <- getBy (UniqueMenuDeadline chefId deadline)
         case mMenu of
           Nothing -> pure Nothing
-          Just (Entity menuId (StoredMenu mPub _ _ desc _ _)) -> do
+          Just (Entity menuId (StoredMenu mPub _ _ desc _ _)) ->
             case mPub of
               Nothing -> pure Nothing
               Just published -> pure $ Just (menuId,published,desc,chefId)
@@ -380,13 +379,13 @@ browseMeal chefPermalink deadline mealPermalink = do
                   [ StoredOrderStoredOrderMeal ==. mealId
                   , StoredOrderStoredOrderProgress !=. DeliveredProgress
                   ]
-                reviewIds <- do
+                reviewIds <-
                   fmap (fmap (\(Entity reviewId _) -> reviewId)) $
                     selectList [StoredReviewStoredReviewMeal ==. mealId] []
                 mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
                 case mRating of
                   Nothing -> pure Nothing
-                  Just rating -> do
+                  Just rating ->
                     pure $ Just (mealId,title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price)
 
   case mStoredMeal of
@@ -432,7 +431,7 @@ getOrders authToken = do
           xs <- flip runSqlPool systemEnvDatabase $
             selectList [StoredOrderStoredOrderCustomer ==. k] []
           fmap (Just . catMaybes) $
-            forM xs $ \(Entity orderId (StoredOrder _ mealId _ _ vol progress time)) -> do
+            forM xs $ \(Entity _ (StoredOrder _ mealId _ _ vol progress time)) -> do
               mMealSynopsis <- getMealSynopsis mealId
               case mMealSynopsis of
                 Nothing -> pure Nothing

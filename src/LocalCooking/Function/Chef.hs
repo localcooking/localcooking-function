@@ -23,7 +23,7 @@ import LocalCooking.Database.Schema.Semantics
   , Unique (UniqueChefOwner))
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
 import LocalCooking.Database.Query.Tag.Meal (insertMealTag)
-import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId)
+import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId, getChefTagById)
 
 import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
@@ -68,7 +68,35 @@ addChefTag authToken tag = do
             else True <$ liftIO (insertChefTag systemEnvDatabase tag)
 
 
--- getChef :: AuthToken -> AppM (Maybe ChefSettings)
+getChef :: AuthToken -> AppM (Maybe ChefSettings)
+getChef authToken = do
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+
+  case systemEnvTokenContexts of
+    TokenContexts{tokenContextAuth} -> do
+      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
+      case mUserId of
+        Nothing -> pure Nothing
+        Just k -> do
+          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
+          if not isAuthorized
+            then pure Nothing
+            else flip runSqlPool systemEnvDatabase $ do
+              mChefEnt <- getBy (UniqueChefOwner k)
+              case mChefEnt of
+                Nothing -> pure Nothing
+                Just (Entity chefId (StoredChef _ name permalink bio images avatar)) -> do
+                  tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
+                  tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
+                    liftIO (getChefTagById systemEnvDatabase tagId)
+                  pure $ Just ChefSettings
+                    { chefSettingsName = name
+                    , chefSettingsPermalink = permalink
+                    , chefSettingsImages = images
+                    , chefSettingsAvatar = avatar
+                    , chefSettingsBio = bio
+                    , chefSettingsTags = tags
+                    }
 
 
 
