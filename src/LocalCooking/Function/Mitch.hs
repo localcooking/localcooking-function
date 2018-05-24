@@ -1,15 +1,17 @@
 {-# LANGUAGE
     NamedFieldPuns
   , RecordWildCards
+  , ScopedTypeVariables
   #-}
 
 module LocalCooking.Function.Mitch where
 
 import LocalCooking.Semantics.Mitch
   ( Customer (..)
+  , Review (..)
   , Chef (..), ChefSynopsis (..)
   , MenuSynopsis (..), Menu (..)
-  , MealSynopsis (..)
+  , MealSynopsis (..), Meal (..)
   , Order (..)
   , getReviewSynopsis
   )
@@ -18,9 +20,18 @@ import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
-import LocalCooking.Database.Query.IngredientDiet (getDietId, getStoredIngredientId, getIngredientViolations)
+import LocalCooking.Common.Tag.Meal (MealTag)
+import LocalCooking.Common.Ingredient (IngredientName)
+import LocalCooking.Common.Diet (Diet)
+import LocalCooking.Database.Query.IngredientDiet
+  ( getDietId
+  , getStoredIngredientId, getIngredientViolations
+  , getIngredientById, getIngredientNameById, getIngredientByName)
 import LocalCooking.Database.Query.Tag.Chef (getChefTagById)
 import LocalCooking.Database.Query.Tag.Meal (getMealTagById)
+-- import LocalCooking.Database.Schema.IngredientDiet
+--   ( 
+--   )
 import LocalCooking.Database.Schema.User.Customer
   ( StoredDietPreference (..)
   , StoredCustomer (..), StoredAllergy (..)
@@ -32,8 +43,8 @@ import LocalCooking.Database.Schema.User.Customer
     )
   , Unique (UniqueCustomer))
 import LocalCooking.Database.Schema.Semantics
-  ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..)
-  , StoredChefId, StoredMealId, StoredMenuId
+  ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
+  , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..), MealIngredient (..)
   , EntityField
     ( MenuTagRelationMenuTagMenu, StoredMenuStoredMenuAuthor
@@ -41,10 +52,10 @@ import LocalCooking.Database.Schema.Semantics
     , StoredOrderStoredOrderMenu, ChefTagRelationChefTagChef
     , StoredOrderStoredOrderCustomer, MealTagRelationMealTagMeal
     , StoredOrderStoredOrderProgress, StoredOrderStoredOrderMeal
-    , StoredMealStoredMealMenu
+    , StoredMealStoredMealMenu, StoredReviewStoredReviewMeal
     , MealIngredientMealIngredientMeal
     )
-  , Unique (UniqueChefPermalink, UniqueMenuDeadline)
+  , Unique (UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline)
   )
 
 import qualified Data.Set as Set
@@ -117,6 +128,47 @@ setCustomer authToken Customer{..} = do
 
               pure True
 
+
+getReview :: StoredReviewId -> AppM (Maybe Review)
+getReview reviewId = do
+  SystemEnv{systemEnvDatabase,systemEnvReviews} <- ask
+
+  flip runSqlPool systemEnvDatabase $ do
+    mReview <- get reviewId
+    case mReview of
+      Nothing -> pure Nothing
+      Just (StoredReview _ _ _ rating submitted heading body images _) ->
+        pure $ Just Review
+          { reviewRating = rating
+          , reviewSubmitted = submitted
+          , reviewHeading = heading
+          , reviewId = reviewId
+          , reviewBody = body
+          , reviewImages = images
+          }
+
+
+-- | Returns the set of violated diets, and used ingredients per diet
+getMealIngredientsDiets :: StoredMealId -> AppM (Maybe ([IngredientName],[Diet]))
+getMealIngredientsDiets mealId = do
+  SystemEnv{systemEnvDatabase} <- ask
+
+  flip runSqlPool systemEnvDatabase $ do
+    mMeal <- get mealId
+    case mMeal of
+      Nothing -> pure Nothing
+      Just _ -> do
+        xs <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
+        ( ings
+          , (ds :: [Set.Set Diet])
+          ) <- fmap (unzip . catMaybes) $ forM xs $ \(Entity _ (MealIngredient _ ingId)) -> liftIO $ do
+          mIng <- liftIO (getIngredientNameById systemEnvDatabase ingId)
+          case mIng of
+            Nothing -> pure Nothing
+            Just ing -> do
+              diets <- liftIO (getIngredientViolations systemEnvDatabase ingId)
+              pure $ Just (ing,Set.fromList diets)
+        pure $ Just (ings, Set.toList (Set.unions ds))
 
 
 getMealSynopsis :: StoredMealId -> AppM (Maybe MealSynopsis)
@@ -275,7 +327,7 @@ browseMenu :: Permalink -> Day -> AppM (Maybe Menu)
 browseMenu chefPermalink deadline = do
   SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
 
-  mMenuDeets <- flip runSqlPool systemEnvDatabase $ do
+  mMenuDeets <- liftIO $ flip runSqlPool systemEnvDatabase $ do
     mChef <- getBy (UniqueChefPermalink chefPermalink)
     case mChef of
       Nothing -> pure Nothing
@@ -304,7 +356,72 @@ browseMenu chefPermalink deadline = do
             , menuMeals = meals
             }
 
--- browseMeal :: Permalink -> Day -> Permalink -> AppM (Maybe Meal)
+browseMeal :: Permalink -> Day -> Permalink -> AppM (Maybe Meal)
+browseMeal chefPermalink deadline mealPermalink = do
+  SystemEnv{systemEnvReviews,systemEnvDatabase} <- ask
+
+  mStoredMeal <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+    mChef <- getBy (UniqueChefPermalink chefPermalink)
+    case mChef of
+      Nothing -> pure Nothing
+      Just (Entity chefId _) -> do
+        mMenu <- getBy (UniqueMenuDeadline chefId deadline)
+        case mMenu of
+          Nothing -> pure Nothing
+          Just (Entity menuId _) -> do
+            mMeal <- getBy (UniqueMealPermalink menuId mealPermalink)
+            case mMeal of
+              Nothing -> pure Nothing
+              Just (Entity mealId (StoredMeal title permalink _ _ desc inst images price)) -> do
+                -- (ings,diets) <- do
+                  -- xs <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
+                  -- fmap (unzip . catMaybes) $ forM xs $ \(Entity _ (MealIngredient _ ingId)) -> liftIO $ do
+                  --   mIng <- getIngredientById systemEnvDatabase ingId
+                  --   diets <- getIngredientViolations systemEnvDatabase ingId
+                  --   case mIng of
+                  --     Nothing -> pure Nothing
+                  --     Just ing -> pure $ Just (ing,diets)
+                (tags :: [MealTag]) <- do
+                  xs <- selectList [MealTagRelationMealTagMeal ==. mealId] []
+                  fmap catMaybes $ forM xs $ \(Entity _ (MealTagRelation _ tagId)) ->
+                    liftIO (getMealTagById systemEnvDatabase tagId)
+                orders <- count
+                  [ StoredOrderStoredOrderMeal ==. mealId
+                  , StoredOrderStoredOrderProgress !=. DeliveredProgress
+                  ]
+                reviewIds <- do
+                  fmap (fmap (\(Entity reviewId _) -> reviewId)) $
+                    selectList [StoredReviewStoredReviewMeal ==. mealId] []
+                mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
+                case mRating of
+                  Nothing -> pure Nothing
+                  Just rating -> do
+                    pure $ Just (mealId,title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price)
+
+  case mStoredMeal of
+    Nothing -> pure Nothing
+    Just (mealId,title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price) -> do
+      reviews <- fmap catMaybes $ forM reviewIds getReview
+      mIngDiets <- getMealIngredientsDiets mealId
+      case mIngDiets of
+        Nothing -> pure Nothing
+        Just (ings,diets) -> do
+          ings' <- fmap catMaybes $ liftIO $
+            forM ings $ getIngredientByName systemEnvDatabase
+          pure $ Just Meal
+            { mealTitle = title
+            , mealPermalink = permalink
+            , mealDescription = desc
+            , mealInstructions = inst
+            , mealImages = images
+            , mealIngredients = ings'
+            , mealDiets = diets
+            , mealTags = tags
+            , mealOrders = orders
+            , mealRating = rating
+            , mealReviews = getReviewSynopsis <$> reviews
+            , mealPrice = price
+            }
 
 
 -- addToCart :: Permalink -> Day -> Permalink -> Int -> AppM Bool
