@@ -172,3 +172,15 @@ browseChef chefPermalink = do
             , chefTags = tags
             , chefMenus = meals
             }
+
+
+browseMenu :: Permalink -> Day -> AppM (Maybe Menu)
+
+browseMeal :: Permalink -> Day -> Permalink -> AppM (Maybe Meal)
+
+
+addToCart :: Permalink -> Day -> Permalink -> Int -> AppM Bool
+
+checkout :: ?
+
+getOrders :: AuthToken -> AppM (Maybe [Order])

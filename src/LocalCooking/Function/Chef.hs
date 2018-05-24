@@ -68,6 +68,9 @@ addChefTag authToken tag = do
             else True <$ liftIO (insertChefTag systemEnvDatabase tag)
 
 
+getChef :: AuthToken -> AppM (Maybe ChefSettings)
+
+
 
 setChef :: AuthToken -> ChefSettings -> AppM (Maybe StoredChefId)
 setChef authToken ChefSettings{..} = do
@@ -123,3 +126,16 @@ setChef authToken ChefSettings{..} = do
                     insert_ (ChefTagRelation chefId t)
 
                   pure (Just chefId)
+
+
+getMenus :: AuthToken -> AppM [(StoredMenuId, MenuSettings)]
+getMenus authToken =
+
+
+setMenu :: AuthToken -> MenuSettings -> AppM (Maybe StoredMenuId)
+
+
+getMeals :: AuthToken -> StoredMenuId -> AppM [(StoredMealId, MealSettings)]
+
+
+setMeal :: AuthToken -> StoredMenuId -> MealSettings -> AppM (Maybe StoredMealId)
