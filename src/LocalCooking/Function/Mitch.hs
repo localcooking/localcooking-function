@@ -24,14 +24,11 @@ import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Ingredient (IngredientName)
 import LocalCooking.Common.Diet (Diet)
 import LocalCooking.Database.Query.IngredientDiet
-  ( getDietId
+  ( getDietId, getDiets
   , getStoredIngredientId, getIngredientViolations
   , getIngredientById, getIngredientNameById, getIngredientByName)
 import LocalCooking.Database.Query.Tag.Chef (getChefTagById)
 import LocalCooking.Database.Query.Tag.Meal (getMealTagById)
--- import LocalCooking.Database.Schema.IngredientDiet
---   ( 
---   )
 import LocalCooking.Database.Schema.User.Customer
   ( StoredDietPreference (..)
   , StoredCustomer (..), StoredAllergy (..)
@@ -148,7 +145,7 @@ getReview reviewId = do
           }
 
 
--- | Returns the set of violated diets, and used ingredients per diet
+-- | Returns the set of non-violated diets, and used ingredients per diet
 getMealIngredientsDiets :: StoredMealId -> AppM (Maybe ([IngredientName],[Diet]))
 getMealIngredientsDiets mealId = do
   SystemEnv{systemEnvDatabase} <- ask
@@ -168,7 +165,9 @@ getMealIngredientsDiets mealId = do
             Just ing -> do
               diets <- liftIO (getIngredientViolations systemEnvDatabase ingId)
               pure $ Just (ing,Set.fromList diets)
-        pure $ Just (ings, Set.toList (Set.unions ds))
+        let violated = Set.unions ds
+        allDiets <- Set.fromList <$> liftIO (getDiets systemEnvDatabase)
+        pure $ Just (ings, Set.toList (allDiets `Set.difference` violated))
 
 
 getMealSynopsis :: StoredMealId -> AppM (Maybe MealSynopsis)
@@ -373,14 +372,6 @@ browseMeal chefPermalink deadline mealPermalink = do
             case mMeal of
               Nothing -> pure Nothing
               Just (Entity mealId (StoredMeal title permalink _ _ desc inst images price)) -> do
-                -- (ings,diets) <- do
-                  -- xs <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
-                  -- fmap (unzip . catMaybes) $ forM xs $ \(Entity _ (MealIngredient _ ingId)) -> liftIO $ do
-                  --   mIng <- getIngredientById systemEnvDatabase ingId
-                  --   diets <- getIngredientViolations systemEnvDatabase ingId
-                  --   case mIng of
-                  --     Nothing -> pure Nothing
-                  --     Just ing -> pure $ Just (ing,diets)
                 (tags :: [MealTag]) <- do
                   xs <- selectList [MealTagRelationMealTagMeal ==. mealId] []
                   fmap catMaybes $ forM xs $ \(Entity _ (MealTagRelation _ tagId)) ->
