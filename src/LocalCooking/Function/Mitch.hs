@@ -6,7 +6,11 @@
 module LocalCooking.Function.Mitch where
 
 import LocalCooking.Semantics.Mitch
-  ( Customer (..), Chef (..), MenuSynopsis (..), MealSynopsis (..), Order (..)
+  ( Customer (..)
+  , Chef (..), ChefSynopsis (..)
+  , MenuSynopsis (..), Menu (..)
+  , MealSynopsis (..)
+  , Order (..)
   , getReviewSynopsis
   )
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
@@ -29,7 +33,7 @@ import LocalCooking.Database.Schema.User.Customer
   , Unique (UniqueCustomer))
 import LocalCooking.Database.Schema.Semantics
   ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..)
-  , StoredChefId, StoredMealId
+  , StoredChefId, StoredMealId, StoredMenuId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..), MealIngredient (..)
   , EntityField
     ( MenuTagRelationMenuTagMenu, StoredMenuStoredMenuAuthor
@@ -37,9 +41,10 @@ import LocalCooking.Database.Schema.Semantics
     , StoredOrderStoredOrderMenu, ChefTagRelationChefTagChef
     , StoredOrderStoredOrderCustomer, MealTagRelationMealTagMeal
     , StoredOrderStoredOrderProgress, StoredOrderStoredOrderMeal
+    , StoredMealStoredMealMenu
     , MealIngredientMealIngredientMeal
     )
-  , Unique (UniqueChefPermalink)
+  , Unique (UniqueChefPermalink, UniqueMenuDeadline)
   )
 
 import qualified Data.Set as Set
@@ -47,6 +52,7 @@ import Data.Maybe (catMaybes)
 import Data.Text.Permalink (Permalink)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import Data.Time (getCurrentTime, utctDay)
+import Data.Time.Calendar (Day)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
@@ -156,6 +162,37 @@ getMealSynopsis mealId = do
             }
 
 
+getChefSynopsis :: StoredChefId -> AppM (Maybe ChefSynopsis)
+getChefSynopsis chefId = do
+  SystemEnv{systemEnvDatabase,systemEnvReviews} <- ask
+
+  mStoredChef <- flip runSqlPool systemEnvDatabase $ do
+    mChef <- get chefId
+    case mChef of
+      Nothing -> pure Nothing
+      Just (StoredChef _ name permalink _ _ avatar) -> do
+        tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
+        tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
+          liftIO (getChefTagById systemEnvDatabase tagId)
+        orders <- count [StoredOrderStoredOrderChef ==. chefId]
+        pure $ Just (name,permalink,avatar,tags,orders)
+  case mStoredChef of
+    Nothing -> pure Nothing
+    Just (name,permalink,avatar,tags,orders) -> do
+      mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
+      case mReviews of
+        Nothing -> pure Nothing
+        Just (rating,_) -> do
+          pure $ Just ChefSynopsis
+            { chefSynopsisName = name
+            , chefSynopsisPermalink = permalink
+            , chefSynopsisImage = avatar
+            , chefSynopsisRating = rating
+            , chefSynopsisOrders = orders
+            , chefSynopsisTags = tags
+            }
+
+
 getChefMenuSynopses :: StoredChefId -> AppM [MenuSynopsis]
 getChefMenuSynopses chefId = do
   SystemEnv{systemEnvDatabase} <- ask
@@ -176,6 +213,15 @@ getChefMenuSynopses chefId = do
             , menuSynopsisImages = images
             }
 
+
+getMenuMealSynopses :: StoredMenuId -> AppM [MealSynopsis]
+getMenuMealSynopses menuId = do
+  SystemEnv{systemEnvDatabase} <- ask
+
+  xs <- flip runSqlPool systemEnvDatabase $
+    selectList [StoredMealStoredMealMenu ==. menuId] []
+  fmap catMaybes $ forM xs $ \(Entity mealId _) ->
+    getMealSynopsis mealId
 
 
 browseChef :: Permalink -> AppM (Maybe Chef)
@@ -225,7 +271,38 @@ browseChef chefPermalink = do
             }
 
 
--- browseMenu :: Permalink -> Day -> AppM (Maybe Menu)
+browseMenu :: Permalink -> Day -> AppM (Maybe Menu)
+browseMenu chefPermalink deadline = do
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+
+  mMenuDeets <- flip runSqlPool systemEnvDatabase $ do
+    mChef <- getBy (UniqueChefPermalink chefPermalink)
+    case mChef of
+      Nothing -> pure Nothing
+      Just (Entity chefId _) -> do
+        mMenu <- getBy (UniqueMenuDeadline chefId deadline)
+        case mMenu of
+          Nothing -> pure Nothing
+          Just (Entity menuId (StoredMenu mPub _ _ desc _ _)) -> do
+            case mPub of
+              Nothing -> pure Nothing
+              Just published -> pure $ Just (menuId,published,desc,chefId)
+
+  case mMenuDeets of
+    Nothing -> pure Nothing
+    Just (menuId,published,desc,chefId) -> do
+      mChef <- getChefSynopsis chefId
+      case mChef of
+        Nothing -> pure Nothing
+        Just chef -> do
+          meals <- getMenuMealSynopses menuId
+          pure $ Just Menu
+            { menuPublished = published
+            , menuDeadline = deadline
+            , menuDescription = desc
+            , menuAuthor = chef
+            , menuMeals = meals
+            }
 
 -- browseMeal :: Permalink -> Day -> Permalink -> AppM (Maybe Meal)
 
