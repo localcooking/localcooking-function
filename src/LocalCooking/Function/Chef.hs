@@ -99,6 +99,9 @@ getChef authToken = do
                     }
 
 
+-- TODO FIXME separate validation routines for each statefully discrepented field?
+
+
 
 setChef :: AuthToken -> ChefSettings -> AppM (Maybe StoredChefId)
 setChef authToken ChefSettings{..} = do
