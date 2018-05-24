@@ -16,6 +16,7 @@ module LocalCooking.Function.System
   ) where
 
 import LocalCooking.Function.System.AccessToken (AccessTokenContext, newAccessTokenContext, expireThread)
+import LocalCooking.Function.System.Review (ReviewAccumulator, newReviewAccumulator, calculateThread)
 import LocalCooking.Common.AccessToken.Email (EmailToken)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Password (HashedPassword)
@@ -77,6 +78,7 @@ data SystemEnv = SystemEnv
   , systemEnvSalt          :: HashedPassword
   , systemEnvTokenContexts :: TokenContexts
   , systemEnvPendingEmail  :: TVar (HashMap EmailToken StoredUserId)
+  , systemEnvReviews       :: ReviewAccumulator
   }
 
 
@@ -102,6 +104,7 @@ newSystemEnv NewSystemEnvArgs{..} = do
   systemEnvTokenContexts <- atomically defTokenContexts
   systemEnvSalt <- getPasswordSalt systemEnvDatabase
   systemEnvPendingEmail <- newTVarIO HashMap.empty
+  systemEnvReviews <- newReviewAccumulator
 
   pure SystemEnv
     { systemEnvDatabase
@@ -110,6 +113,7 @@ newSystemEnv NewSystemEnvArgs{..} = do
     , systemEnvSalt
     , systemEnvTokenContexts
     , systemEnvPendingEmail
+    , systemEnvReviews
     }
 
 

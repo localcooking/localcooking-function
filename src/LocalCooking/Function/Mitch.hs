@@ -5,8 +5,9 @@
 
 module LocalCooking.Function.Mitch where
 
-import LocalCooking.Semantics.Mitch (Customer (..), Chef (..), MenuSynopsis (..))
+import LocalCooking.Semantics.Mitch (Customer (..), Chef (..), MenuSynopsis (..), getReviewSynopsis)
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
+import LocalCooking.Function.System.Review (lookupChefReviews)
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Database.Query.IngredientDiet (getDietId, getStoredIngredientId)
@@ -23,20 +24,27 @@ import LocalCooking.Database.Schema.User.Customer
     )
   , Unique (UniqueCustomer))
 import LocalCooking.Database.Schema.Semantics
-  ( StoredMenu (..), StoredChefId
-  , MenuTagRelation (..)
-  , EntityField (MenuTagRelationMenuTagMenu, StoredMenuStoredMenuAuthor)
+  ( StoredMenu (..), StoredChef (..), StoredChefId
+  , MenuTagRelation (..), ChefTagRelation (..)
+  , EntityField
+    ( MenuTagRelationMenuTagMenu, StoredMenuStoredMenuAuthor
+    , StoredOrderStoredOrderChef, StoredMenuStoredMenuDeadline
+    , StoredOrderStoredOrderMenu, ChefTagRelationChefTagChef
+    )
+  , Unique (UniqueChefPermalink)
   )
 
 import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
 import Data.Text.Permalink (Permalink)
+import Data.IORef (newIORef, readIORef, modifyIORef)
+import Data.Time (getCurrentTime, utctDay)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
-import Database.Persist (Entity (..), (==.), (=.))
+import Database.Persist (Entity (..), (==.), (=.), (>=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, getBy, insert, insert_, deleteWhere, update)
+import Database.Persist.Class (selectList, getBy, insert, insert_, deleteWhere, update, count)
 
 
 setCustomer :: AuthToken -> Customer -> AppM Bool
@@ -97,8 +105,8 @@ setCustomer authToken Customer{..} = do
 
 
 
-getChefMenu :: StoredChefId -> AppM [MenuSynopsis]
-getChefMenu chefId = do
+getChefMenuSynopses :: StoredChefId -> AppM [MenuSynopsis]
+getChefMenuSynopses chefId = do
   SystemEnv{systemEnvDatabase} <- ask
 
   flip runSqlPool systemEnvDatabase $ do
@@ -119,28 +127,48 @@ getChefMenu chefId = do
 
 
 
--- browseChef :: Permalink -> AppM (Maybe Chef)
--- browseChef chefPermalink = do
---   SystemEnv{systemEnvDatabase} <- ask
+browseChef :: Permalink -> AppM (Maybe Chef)
+browseChef chefPermalink = do
+  SystemEnv{systemEnvDatabase,systemEnvReviews} <- ask
 
---   flip runSqlPool systemEnvDatabase $ do
---     mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
---     case mChefEnt of
---       Nothing -> pure Nothing
---       Just (Entity chefId (StoredChef _ name permalink bio images _)) -> do
---         tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
---         tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
---           liftIO (getChefTagById systemEnvDatabase tagId)
+  mDeets <- flip runSqlPool systemEnvDatabase $ do
+    mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
+    case mChefEnt of
+      Nothing -> pure Nothing
+      Just (Entity chefId (StoredChef _ name permalink bio images _)) -> do
+        tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
+        tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
+          liftIO (getChefTagById systemEnvDatabase tagId)
 
---         pure $ Just Chef
---           { chefName = name
---           , chefPermalink = permalink
---           , chefImages = images
---           , chefBio = bio
---           , chefRating = _
---           , chefReviews = _
---           , chefActiveOrders = _
---           , chefTotalOrders = _
---           , chefTags = tags
---           , chefMenus = _
---           }
+        totalOrders <- count [StoredOrderStoredOrderChef ==. chefId]
+        today <- utctDay <$> liftIO getCurrentTime
+        activeOrders <- do
+          menus <- selectList [StoredMenuStoredMenuDeadline >=. today] []
+          countRef <- liftIO (newIORef 0)
+          forM_ menus $ \(Entity menuId _) -> do
+            n <- count [StoredOrderStoredOrderMenu ==. menuId]
+            liftIO (modifyIORef countRef (+ n))
+          liftIO (readIORef countRef)
+        pure $ Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders)
+        -- FIXME TODO reviews engine - skimming the top for chefs, but still accum the rating value. Same w/ meals
+
+  case mDeets of
+    Nothing -> pure Nothing
+    Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders) -> do
+      meals <- getChefMenuSynopses chefId
+      mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
+      case mReviews of
+        Nothing -> pure Nothing
+        Just (rating,reviews) -> do
+          pure $ Just Chef
+            { chefName = name
+            , chefPermalink = permalink
+            , chefImages = images
+            , chefBio = bio
+            , chefRating = rating
+            , chefReviews = getReviewSynopsis <$> reviews
+            , chefActiveOrders = activeOrders
+            , chefTotalOrders = totalOrders
+            , chefTags = tags
+            , chefMenus = meals
+            }
