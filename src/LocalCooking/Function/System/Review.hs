@@ -79,7 +79,7 @@ lookupChefReviews ReviewAccumulator{reviewAccumChefs} chefId = atomically $ do
   pure (HashMap.lookup chefId xs)
 
 
-lookupMealReviews :: ReviewAccumulator -> StoredMealId -> IO (Maybe Rating)
-lookupMealReviews ReviewAccumulator{reviewAccumMeals} mealId = atomically $ do
+lookupMealRating :: ReviewAccumulator -> StoredMealId -> IO (Maybe Rating)
+lookupMealRating ReviewAccumulator{reviewAccumMeals} mealId = atomically $ do
   xs <- readTVar reviewAccumMeals
   pure (HashMap.lookup mealId xs)

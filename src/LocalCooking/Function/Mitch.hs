@@ -5,12 +5,16 @@
 
 module LocalCooking.Function.Mitch where
 
-import LocalCooking.Semantics.Mitch (Customer (..), Chef (..), MenuSynopsis (..), getReviewSynopsis)
+import LocalCooking.Semantics.Mitch
+  ( Customer (..), Chef (..), MenuSynopsis (..), MealSynopsis (..), Order (..)
+  , getReviewSynopsis
+  )
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
-import LocalCooking.Function.System.Review (lookupChefReviews)
+import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
-import LocalCooking.Database.Query.IngredientDiet (getDietId, getStoredIngredientId)
+import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
+import LocalCooking.Database.Query.IngredientDiet (getDietId, getStoredIngredientId, getIngredientViolations)
 import LocalCooking.Database.Query.Tag.Chef (getChefTagById)
 import LocalCooking.Database.Query.Tag.Meal (getMealTagById)
 import LocalCooking.Database.Schema.User.Customer
@@ -24,12 +28,16 @@ import LocalCooking.Database.Schema.User.Customer
     )
   , Unique (UniqueCustomer))
 import LocalCooking.Database.Schema.Semantics
-  ( StoredMenu (..), StoredChef (..), StoredChefId
-  , MenuTagRelation (..), ChefTagRelation (..)
+  ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..)
+  , StoredChefId, StoredMealId
+  , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..), MealIngredient (..)
   , EntityField
     ( MenuTagRelationMenuTagMenu, StoredMenuStoredMenuAuthor
     , StoredOrderStoredOrderChef, StoredMenuStoredMenuDeadline
     , StoredOrderStoredOrderMenu, ChefTagRelationChefTagChef
+    , StoredOrderStoredOrderCustomer, MealTagRelationMealTagMeal
+    , StoredOrderStoredOrderProgress, StoredOrderStoredOrderMeal
+    , MealIngredientMealIngredientMeal
     )
   , Unique (UniqueChefPermalink)
   )
@@ -42,9 +50,9 @@ import Data.Time (getCurrentTime, utctDay)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
-import Database.Persist (Entity (..), (==.), (=.), (>=.))
+import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, getBy, insert, insert_, deleteWhere, update, count)
+import Database.Persist.Class (selectList, get, getBy, insert, insert_, deleteWhere, update, count)
 
 
 setCustomer :: AuthToken -> Customer -> AppM Bool
@@ -103,6 +111,49 @@ setCustomer authToken Customer{..} = do
 
               pure True
 
+
+
+getMealSynopsis :: StoredMealId -> AppM (Maybe MealSynopsis)
+getMealSynopsis mealId = do
+  SystemEnv{systemEnvDatabase,systemEnvReviews} <- ask
+
+  mCont <- flip runSqlPool systemEnvDatabase $ do
+    mMeal <- get mealId
+    case mMeal of
+      Nothing -> pure Nothing
+      Just (StoredMeal title permalink _ heading _ _ images price) -> do
+        diets <- do
+          ings <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
+          fmap concat $ forM ings $ \(Entity _ (MealIngredient _ ingId)) ->
+            liftIO (getIngredientViolations systemEnvDatabase ingId)
+        now <- liftIO getCurrentTime
+        orders <- count
+          [ StoredOrderStoredOrderMeal ==. mealId
+          , StoredOrderStoredOrderProgress !=. DeliveredProgress
+          ]
+        tags <- fmap catMaybes $ do
+          xs <- selectList [MealTagRelationMealTagMeal ==. mealId] []
+          forM xs $ \(Entity _ (MealTagRelation _ tagId)) ->
+            liftIO (getMealTagById systemEnvDatabase tagId)
+        pure $ Just (title,permalink,heading,images,price,diets,orders,tags)
+  case mCont of
+    Nothing -> pure Nothing
+    Just (title,permalink,heading,images,price,diets,orders,tags) -> do
+      mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
+      case mRating of
+        Nothing -> pure Nothing
+        Just rating -> do
+          pure $ Just MealSynopsis
+            { mealSynopsisTitle = title
+            , mealSynopsisPermalink = permalink
+            , mealSynopsisHeading = heading
+            , mealSynopsisImages = images
+            , mealSynopsisRating = rating
+            , mealSynopsisOrders = orders
+            , mealSynopsisTags = tags
+            , mealSynopsisDiets = diets
+            , mealSynopsisPrice = price
+            }
 
 
 getChefMenuSynopses :: StoredChefId -> AppM [MenuSynopsis]
@@ -174,13 +225,36 @@ browseChef chefPermalink = do
             }
 
 
-browseMenu :: Permalink -> Day -> AppM (Maybe Menu)
+-- browseMenu :: Permalink -> Day -> AppM (Maybe Menu)
 
-browseMeal :: Permalink -> Day -> Permalink -> AppM (Maybe Meal)
+-- browseMeal :: Permalink -> Day -> Permalink -> AppM (Maybe Meal)
 
 
-addToCart :: Permalink -> Day -> Permalink -> Int -> AppM Bool
+-- addToCart :: Permalink -> Day -> Permalink -> Int -> AppM Bool
 
-checkout :: ?
+-- checkout :: ?
 
 getOrders :: AuthToken -> AppM (Maybe [Order])
+getOrders authToken = do
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+
+  case systemEnvTokenContexts of
+    TokenContexts{tokenContextAuth} -> do
+      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
+      case mUserId of
+        Nothing -> pure Nothing
+        Just k -> do
+          xs <- flip runSqlPool systemEnvDatabase $
+            selectList [StoredOrderStoredOrderCustomer ==. k] []
+          fmap (Just . catMaybes) $
+            forM xs $ \(Entity orderId (StoredOrder _ mealId _ _ vol progress time)) -> do
+              mMealSynopsis <- getMealSynopsis mealId
+              case mMealSynopsis of
+                Nothing -> pure Nothing
+                Just meal ->
+                  pure $ Just Order
+                    { orderMeal = meal
+                    , orderProgress = progress
+                    , orderTime = time
+                    , orderVolume = vol
+                    }
