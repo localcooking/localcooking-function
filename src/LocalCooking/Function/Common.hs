@@ -71,6 +71,7 @@ register Register{..} = do
         pure True
 
 
+-- | Something like "get user details"
 getUser :: AuthToken -> AppM (Maybe User)
 getUser authToken = do
   SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
@@ -107,7 +108,7 @@ getUser authToken = do
                   }
 
 
-
+-- | "set user details"
 setUser :: AuthToken -> User -> AppM Bool
 setUser authToken User{..} = do
   SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
