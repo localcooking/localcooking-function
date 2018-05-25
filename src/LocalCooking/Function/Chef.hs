@@ -8,7 +8,7 @@ module LocalCooking.Function.Chef where
 import LocalCooking.Semantics.Chef
   ( ChefSettings (..), MenuSettings (..)
   )
-import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
+import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), getUserId)
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
@@ -47,34 +47,22 @@ import Database.Persist.Class (selectList, getBy, insert, insert_, delete, delet
 
 addMealTag :: AuthToken -> MealTag -> AppM Bool
 addMealTag authToken tag = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
-        Nothing -> pure False
-        Just k -> do
-          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
-          if not isAuthorized
-            then pure False
-            else True <$ liftIO (insertMealTag systemEnvDatabase tag)
+  isAuthorized <- hasChefRole authToken
+  if not isAuthorized
+    then pure False
+    else do
+      SystemEnv{systemEnvDatabase} <- ask
+      True <$ liftIO (insertMealTag systemEnvDatabase tag)
 
 
 addChefTag :: AuthToken -> ChefTag -> AppM Bool
 addChefTag authToken tag = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
-        Nothing -> pure False
-        Just k -> do
-          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
-          if not isAuthorized
-            then pure False
-            else True <$ liftIO (insertChefTag systemEnvDatabase tag)
+  isAuthorized <- hasChefRole authToken
+  if not isAuthorized
+    then pure False
+    else do
+      SystemEnv{systemEnvDatabase} <- ask
+      True <$ liftIO (insertChefTag systemEnvDatabase tag)
 
 
 
@@ -137,33 +125,24 @@ assignMealTags mealId mealSettingsTags = do
 
 getChef :: AuthToken -> AppM (Maybe ChefSettings)
 getChef authToken = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
-        Nothing -> pure Nothing
-        Just k -> do
-          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
-          if not isAuthorized
-            then pure Nothing
-            else flip runSqlPool systemEnvDatabase $ do
-              mChefEnt <- getBy (UniqueChefOwner k)
-              case mChefEnt of
-                Nothing -> pure Nothing
-                Just (Entity chefId (StoredChef _ name permalink bio images avatar)) -> do
-                  tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
-                  tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
-                    liftIO (getChefTagById systemEnvDatabase tagId)
-                  pure $ Just ChefSettings
-                    { chefSettingsName = name
-                    , chefSettingsPermalink = permalink
-                    , chefSettingsImages = images
-                    , chefSettingsAvatar = avatar
-                    , chefSettingsBio = bio
-                    , chefSettingsTags = tags
-                    }
+  mChef <- getChefFromAuthToken authToken
+  case mChef of
+    Nothing -> pure Nothing
+    Just (chefId, StoredChef _ name permalink bio images avatar) -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        tags <- do
+          tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
+          fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
+            liftIO (getChefTagById systemEnvDatabase tagId)
+        pure $ Just ChefSettings
+          { chefSettingsName = name
+          , chefSettingsPermalink = permalink
+          , chefSettingsImages = images
+          , chefSettingsAvatar = avatar
+          , chefSettingsBio = bio
+          , chefSettingsTags = tags
+          }
 
 
 -- TODO FIXME separate validation routines for each stateful field?
@@ -172,51 +151,37 @@ getChef authToken = do
 
 setChef :: AuthToken -> ChefSettings -> AppM (Maybe StoredChefId)
 setChef authToken ChefSettings{..} = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
-        Nothing -> pure Nothing
-        Just k -> do
-          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
-          if not isAuthorized
-            then pure Nothing
-            else do
-              mChefId <- flip runSqlPool systemEnvDatabase $ do
-                mChefEnt <- getBy (UniqueChefOwner k)
-                case mChefEnt of
-                  Nothing -> do
-                    chefId <- insert $ StoredChef
-                      k
-                      chefSettingsName
-                      chefSettingsPermalink
-                      chefSettingsBio
-                      chefSettingsImages
-                      chefSettingsAvatar
-                    forM_ chefSettingsTags $ \t -> do
-                      mChefTagId <- liftIO (getChefTagId systemEnvDatabase t)
-                      case mChefTagId of
-                        Nothing -> pure ()
-                        Just chefTagId -> insert_ (ChefTagRelation chefId chefTagId)
-                    pure (Just chefId)
-                  Just (Entity chefId _) -> do
-                    update chefId
-                      [ StoredChefStoredChefName =. chefSettingsName
-                      , StoredChefStoredChefPermalink =. chefSettingsPermalink
-                      , StoredChefStoredChefBio =. chefSettingsBio
-                      , StoredChefStoredChefImages =. chefSettingsImages
-                      , StoredChefStoredChefAvatar =. chefSettingsAvatar
-                      ]
-                    pure $ Just chefId
-
-              case mChefId of
-                Nothing -> pure Nothing
-                Just chefId -> do
-                  assignChefTags chefId chefSettingsTags
-
-                  pure (Just chefId)
+  SystemEnv{systemEnvDatabase} <- ask
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      mChef <- getChefFromAuthToken authToken
+      case mChef of
+        Nothing -> liftIO $ flip runSqlPool systemEnvDatabase $ do
+          chefId <- insert $ StoredChef
+            userId
+            chefSettingsName
+            chefSettingsPermalink
+            chefSettingsBio
+            chefSettingsImages
+            chefSettingsAvatar
+          forM_ chefSettingsTags $ \t -> do
+            mChefTagId <- liftIO (getChefTagId systemEnvDatabase t)
+            case mChefTagId of
+              Nothing -> pure ()
+              Just chefTagId -> insert_ (ChefTagRelation chefId chefTagId)
+          pure (Just chefId)
+        Just (chefId, _) -> do
+          flip runSqlPool systemEnvDatabase $ update chefId
+            [ StoredChefStoredChefName =. chefSettingsName
+            , StoredChefStoredChefPermalink =. chefSettingsPermalink
+            , StoredChefStoredChefBio =. chefSettingsBio
+            , StoredChefStoredChefImages =. chefSettingsImages
+            , StoredChefStoredChefAvatar =. chefSettingsAvatar
+            ]
+          assignChefTags chefId chefSettingsTags
+          pure (Just chefId)
 
 
 getMenus :: AuthToken -> AppM (Maybe ([(StoredMenuId, MenuSettings)]))
@@ -327,7 +292,48 @@ setMenu authToken menuId MenuSettings{..} = do
 
 
 -- getMeals :: AuthToken -> StoredMenuId -> AppM [(StoredMealId, MealSettings)]
--- getMeals
+-- getMeals authToken menuId = do
+--   SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+
+--   case systemEnvTokenContexts of
+--     TokenContexts{tokenContextAuth} -> do
+--       mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
+--       case mUserId of
+--         Nothing -> pure False
+--         Just k -> do
+--           isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
+--           if not isAuthorized
+--             then pure False
+--             else do
+--               ok <- flip runSqlPool systemEnvDatabase $ do
+--                 mChefEnt <- getBy (UniqueChefOwner k)
+--                 case mChefEnt of
 
 
 -- newMeal :: AuthToken -> StoredMenuId -> MealSettings -> AppM (Maybe StoredMealId)
+
+
+hasChefRole :: AuthToken -> AppM Bool
+hasChefRole authToken = do
+  SystemEnv{systemEnvDatabase} <- ask
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> liftIO (hasRole systemEnvDatabase userId Chef)
+
+
+getChefFromAuthToken :: AuthToken -> AppM (Maybe (StoredChefId, StoredChef))
+getChefFromAuthToken authToken = do
+  SystemEnv{systemEnvDatabase} <- ask
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      isAuthorized <- liftIO (hasRole systemEnvDatabase userId Chef)
+      if not isAuthorized
+        then pure Nothing
+        else flip runSqlPool systemEnvDatabase $ do
+          mEnt <- getBy (UniqueChefOwner userId)
+          case mEnt of
+            Nothing -> pure Nothing
+            Just (Entity chefId chef) -> pure $ Just (chefId, chef)

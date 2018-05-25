@@ -13,9 +13,10 @@ module LocalCooking.Function.System
   , Managers (..)
   , TokenContexts (..)
   , Keys (..)
+  , getUserId
   ) where
 
-import LocalCooking.Function.System.AccessToken (AccessTokenContext, newAccessTokenContext, expireThread)
+import LocalCooking.Function.System.AccessToken (AccessTokenContext, newAccessTokenContext, expireThread, lookupAccess)
 import LocalCooking.Function.System.Review (ReviewAccumulator, newReviewAccumulator, calculateThread)
 import LocalCooking.Common.AccessToken.Email (EmailToken)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -38,7 +39,8 @@ import Data.Time.Clock (secondsToDiffTime)
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.UTF8 as BS8
 import Control.Monad.Logger (runStderrLoggingT)
-import Control.Monad.Reader (ReaderT (runReaderT))
+import Control.Monad.Reader (ReaderT (runReaderT), ask)
+import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Exception (bracket)
 import Control.Concurrent.Async (async, cancel)
 import Control.Concurrent.STM (STM, atomically, TVar, newTVarIO)
@@ -188,3 +190,15 @@ instance FromJSON Keys where
     keysSparkPost <- o .: "sparkPost"
     pure Keys{keysFacebook,keysGoogle,keysSparkPost}
   parseJSON x = typeMismatch "Keys" x
+
+
+
+-- * Utils
+
+
+getUserId :: AuthToken -> AppM (Maybe StoredUserId)
+getUserId authToken = do
+  SystemEnv{systemEnvTokenContexts} <- ask
+  case systemEnvTokenContexts of
+    TokenContexts{tokenContextAuth} ->
+      liftIO (lookupAccess tokenContextAuth authToken)
