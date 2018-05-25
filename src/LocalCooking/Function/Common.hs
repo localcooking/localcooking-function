@@ -10,9 +10,12 @@ import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
-import LocalCooking.Database.Schema.User (StoredUser (..), EntityField (StoredUserEmail, StoredUserPassword, StoredUserCreated), Unique (UniqueEmail))
+import LocalCooking.Database.Schema.User
+  ( StoredUser (..)
+  , EntityField
+    (StoredUserEmail, StoredUserPassword, StoredUserCreated, StoredUserConfirmed)
+  , Unique (UniqueEmail))
 import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
-import LocalCooking.Database.Schema.User.Pending (PendingRegistrationConfirm (..), Unique (UniquePendingRegistration))
 
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set
@@ -34,7 +37,7 @@ login Login{..} = do
     mEnt <- getBy (UniqueEmail loginEmail)
     case mEnt of
       Nothing -> pure Nothing
-      Just (Entity k (StoredUser _ _ p))
+      Just (Entity k (StoredUser _ _ p _))
         | p == loginPassword -> pure (Just k)
         | otherwise -> pure Nothing
   case mUserId of
@@ -62,12 +65,13 @@ register Register{..} = do
       Just _ -> pure False
       Nothing -> do
         now <- liftIO getCurrentTime
-        k <- insert (StoredUser now registerEmail registerPassword)
+        k <- insert (StoredUser now registerEmail registerPassword False)
         case registerSocial of
           SocialLoginForm mFb -> do
             case mFb of
               Nothing -> pure ()
               Just userFb -> insert_ (FacebookUserDetails userFb k)
+        -- TODO FIXME issue an Email token, send email
         pure True
 
 
@@ -86,8 +90,7 @@ getUser authToken = do
             mStoredUser <- get k
             case mStoredUser of
               Nothing -> pure Nothing
-              Just (StoredUser created email password) -> do
-                mPending <- getBy (UniquePendingRegistration k)
+              Just (StoredUser created email password conf) -> do
                 roles <- fmap (fmap (\(Entity _ (UserRoleStored r _)) -> r))
                       $ selectList [UserRoleStoredUserRoleOwner ==. k] []
                 mFb <- getBy (FacebookUserDetailsOwner k)
@@ -101,9 +104,7 @@ getUser authToken = do
                       Nothing -> Nothing
                       Just (Entity _ (FacebookUserDetails uId _)) -> Just uId
                     }
-                  , userEmailConfirmed = case mPending of
-                      Nothing -> True
-                      Just _ -> False
+                  , userEmailConfirmed = conf
                   , userRoles = roles
                   }
 
@@ -126,10 +127,8 @@ setUser authToken User{..} = do
                   [ StoredUserCreated =. userCreated
                   , StoredUserEmail =. userEmail
                   , StoredUserPassword =. userPassword
+                  , StoredUserConfirmed =. userEmailConfirmed
                   ]
-                if userEmailConfirmed
-                  then deleteBy (UniquePendingRegistration userId)
-                  else insert_ (PendingRegistrationConfirm userId)
                 case userSocial of
                   SocialLoginForm mFb -> do
                     case mFb of

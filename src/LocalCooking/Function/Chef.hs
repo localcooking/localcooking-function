@@ -33,13 +33,9 @@ import LocalCooking.Database.Schema.Semantics
     , StoredMealStoredMealHeading, StoredMealStoredMealImages
     , StoredMealStoredMealInstructions, StoredMealStoredMealPermalink
     , StoredMealStoredMealPrice, StoredMealStoredMealTitle
-    , ChefTagRelationChefTagChef, ChefTagRelationChefTagChefTag
-    , MenuTagRelationMenuTagMenu
-    , MealTagRelationMealTagMeal
     )
   , Unique
-    ( UniqueChefOwner, UniqueChefTag, UniqueMealTag, UniqueMenuTag
-    , UniqueMealPermalink, UniqueMenuDeadline)
+    ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline)
   )
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
 import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId)
