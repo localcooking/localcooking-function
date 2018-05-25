@@ -15,7 +15,7 @@ import LocalCooking.Semantics.Mitch
   , Order (..)
   , getReviewSynopsis
   )
-import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
+import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), getUserId)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -33,13 +33,14 @@ import LocalCooking.Database.Query.Semantics (getMealId)
 import LocalCooking.Database.Schema.User.Customer
   ( StoredDietPreference (..)
   , StoredCustomer (..), StoredAllergy (..)
+  , StoredCustomerId
   , EntityField
     ( StoredDietPreferenceDietPreferenceOwner
     , StoredDietPreferenceDietPreferenceDiet, StoredCustomerStoredCustomerAddress
     , StoredCustomerStoredCustomerName
     , StoredAllergyAllergy, StoredAllergyAllergyOwner
     )
-  , Unique (UniqueCustomer))
+  , Unique (UniqueCustomer, UniqueDietPreference))
 import LocalCooking.Database.Schema.Semantics
   ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
   , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId
@@ -70,64 +71,72 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
 import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, get, getBy, insert, insert_, deleteWhere, update, count)
+import Database.Persist.Class (selectList, get, getBy, insert, insert_, deleteBy, deleteWhere, update, count)
+
+
+
+assignDiets :: StoredCustomerId -> [Diet] -> AppM ()
+assignDiets custId customerDiets = do
+  SystemEnv{systemEnvDatabase} <- ask
+
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    oldDiets <- fmap (fmap (\(Entity _ (StoredDietPreference _ d)) -> d))
+              $ selectList [StoredDietPreferenceDietPreferenceOwner ==. custId] []
+    newDiets <- fmap catMaybes $ forM customerDiets $ \d ->
+                liftIO (getDietId systemEnvDatabase d)
+    let toRemove = Set.fromList oldDiets `Set.difference` Set.fromList newDiets
+        toAdd = Set.fromList newDiets `Set.difference` Set.fromList oldDiets
+    forM_ toRemove $ \d ->
+      deleteBy (UniqueDietPreference custId d)
+    forM_ toAdd $ \d ->
+      insert_ (StoredDietPreference custId d)
+
+
+
+assignAllergies :: StoredCustomerId -> [IngredientName] -> AppM ()
+assignAllergies custId customerAllergies = do
+  SystemEnv{systemEnvDatabase} <- ask
+
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    oldAllergys <- fmap (fmap (\(Entity _ (StoredAllergy _ d)) -> d))
+                $ selectList [StoredAllergyAllergyOwner ==. custId] []
+    newAllergys <- fmap catMaybes $ forM customerAllergies $ \i ->
+                  liftIO (getStoredIngredientId systemEnvDatabase i)
+    let toRemove = Set.fromList oldAllergys `Set.difference` Set.fromList newAllergys
+        toAdd = Set.fromList newAllergys `Set.difference` Set.fromList oldAllergys
+    forM_ toRemove $ \i -> deleteWhere
+      [ StoredAllergyAllergyOwner ==. custId
+      , StoredAllergyAllergy ==. i
+      ]
+    forM_ toAdd $ \i -> insert_ (StoredAllergy custId i)
+
 
 
 setCustomer :: AuthToken -> Customer -> AppM Bool
 setCustomer authToken Customer{..} = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      mCust <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mCustEnt <- getBy (UniqueCustomer userId)
+        case mCustEnt of
+          Nothing -> do
+            custId <- insert (StoredCustomer userId customerName customerAddress)
+            pure (Just custId)
+          Just (Entity custId _) -> do
+            update custId
+              [ StoredCustomerStoredCustomerName =. customerName
+              , StoredCustomerStoredCustomerAddress =. customerAddress
+              ]
+            pure (Just custId)
+      case mCust of
         Nothing -> pure False
-        Just k -> flip runSqlPool systemEnvDatabase $ do
-          mCustEnt <- getBy (UniqueCustomer k)
-          case mCustEnt of
-            Nothing -> do
-              custId <- insert (StoredCustomer k customerName customerAddress)
-              forM_ customerDiets $ \d -> do
-                mDietId <- liftIO (getDietId systemEnvDatabase d)
-                case mDietId of
-                  Nothing -> pure ()
-                  Just dietId -> insert_ (StoredDietPreference custId dietId)
-              forM_ customerAllergies $ \i -> do
-                mIngId <- liftIO (getStoredIngredientId systemEnvDatabase i)
-                case mIngId of
-                  Nothing -> pure ()
-                  Just ingId -> insert_ (StoredAllergy custId ingId)
-              pure True
-            Just (Entity custId _) -> do
-              update custId
-                [ StoredCustomerStoredCustomerName =. customerName
-                , StoredCustomerStoredCustomerAddress =. customerAddress
-                ]
-              oldDiets <- fmap (fmap (\(Entity _ (StoredDietPreference _ d)) -> d))
-                        $ selectList [StoredDietPreferenceDietPreferenceOwner ==. custId] []
-              newDiets <- fmap catMaybes $ forM customerDiets $ \d ->
-                          liftIO (getDietId systemEnvDatabase d)
-              let toRemove = Set.fromList oldDiets `Set.difference` Set.fromList newDiets
-                  toAdd = Set.fromList newDiets `Set.difference` Set.fromList oldDiets
-              forM_ toRemove $ \d -> deleteWhere
-                [ StoredDietPreferenceDietPreferenceOwner ==. custId
-                , StoredDietPreferenceDietPreferenceDiet ==. d
-                ]
-              forM_ toAdd $ \d -> insert_ (StoredDietPreference custId d)
-
-              oldAllergys <- fmap (fmap (\(Entity _ (StoredAllergy _ d)) -> d))
-                          $ selectList [StoredAllergyAllergyOwner ==. custId] []
-              newAllergys <- fmap catMaybes $ forM customerAllergies $ \i ->
-                            liftIO (getStoredIngredientId systemEnvDatabase i)
-              let toRemove = Set.fromList oldAllergys `Set.difference` Set.fromList newAllergys
-                  toAdd = Set.fromList newAllergys `Set.difference` Set.fromList oldAllergys
-              forM_ toRemove $ \i -> deleteWhere
-                [ StoredAllergyAllergyOwner ==. custId
-                , StoredAllergyAllergy ==. i
-                ]
-              forM_ toAdd $ \i -> insert_ (StoredAllergy custId i)
-
-              pure True
+        Just custId -> do
+          assignDiets custId customerDiets
+          assignAllergies custId customerAllergies
+          pure True
 
 
 getReview :: StoredReviewId -> AppM (Maybe Review)
