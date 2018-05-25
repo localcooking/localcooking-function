@@ -19,6 +19,7 @@ import LocalCooking.Database.Schema.Semantics
   ( StoredChef (..), StoredMenu (..), StoredMeal (..)
   , StoredChefId, StoredMenuId, StoredMealId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
+  , MealIngredient (..)
   , EntityField
     ( StoredChefStoredChefName, StoredChefStoredChefPermalink
     , StoredChefStoredChefImages, StoredChefStoredChefAvatar
@@ -31,10 +32,14 @@ import LocalCooking.Database.Schema.Semantics
     , MenuTagRelationMenuTagMenu
     , MealTagRelationMealTagMeal
     )
-  , Unique (UniqueChefOwner, UniqueChefTag, UniqueMealTag, UniqueMenuTag))
+  , Unique
+    ( UniqueChefOwner, UniqueChefTag, UniqueMealTag, UniqueMenuTag
+    , UniqueMealPermalink, UniqueMenuDeadline)
+  )
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
 import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId, getMealTagById)
 import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId, getChefTagById)
+import LocalCooking.Database.Query.IngredientDiet (getStoredIngredientId)
 
 import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
@@ -222,19 +227,23 @@ newMenu authToken MenuSettings{..} = do
     Just (chefId, _) -> do
       SystemEnv{systemEnvDatabase} <- ask
       liftIO $ flip runSqlPool systemEnvDatabase $ do
-        menuId <- insert $ StoredMenu
-          menuSettingsPublished
-          menuSettingsDeadline
-          menuSettingsHeading
-          menuSettingsDescription
-          menuSettingsImages
-          chefId
-        forM_ menuSettingsTags $ \tag -> do
-          mTagId <- liftIO (getMealTagId systemEnvDatabase tag)
-          case mTagId of
-            Nothing -> pure ()
-            Just tagId -> insert_ (MenuTagRelation menuId tagId)
-        pure (Just menuId)
+        mEnt <- getBy (UniqueMenuDeadline chefId menuSettingsDeadline)
+        case mEnt of
+          Just _ -> pure Nothing
+          Nothing -> do
+            menuId <- insert $ StoredMenu
+              menuSettingsPublished
+              menuSettingsDeadline
+              menuSettingsHeading
+              menuSettingsDescription
+              menuSettingsImages
+              chefId
+            forM_ menuSettingsTags $ \tag -> do
+              mTagId <- liftIO (getMealTagId systemEnvDatabase tag)
+              case mTagId of
+                Nothing -> pure ()
+                Just tagId -> insert_ (MenuTagRelation menuId tagId)
+            pure (Just menuId)
 
 
 setMenu :: AuthToken -> StoredMenuId -> MenuSettings -> AppM Bool
@@ -289,10 +298,41 @@ getMeals authToken menuId = do
                       , mealSettingsPrice = price
                       }
                     )
-          
 
 
--- newMeal :: AuthToken -> StoredMenuId -> MealSettings -> AppM (Maybe StoredMealId)
+newMeal :: AuthToken -> StoredMenuId -> MealSettings -> AppM (Maybe StoredMealId)
+newMeal authToken menuId MealSettings{..} = do
+  mChef <- getChefFromAuthToken authToken
+  case mChef of
+    Nothing -> pure Nothing
+    Just (chefId,_) -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mEnt <- getBy (UniqueMealPermalink menuId mealSettingsPermalink)
+        case mEnt of
+          Just _ -> pure Nothing
+          Nothing -> do
+            mealId <- insert $ StoredMeal
+              mealSettingsTitle
+              mealSettingsPermalink
+              menuId
+              mealSettingsHeading
+              mealSettingsDescription
+              mealSettingsInstructions
+              mealSettingsImages
+              mealSettingsPrice
+            forM_ mealSettingsIngredients $ \ingName -> do
+              mIngId <- liftIO (getStoredIngredientId systemEnvDatabase ingName)
+              case mIngId of
+                Nothing -> pure ()
+                Just ingId -> insert_ (MealIngredient mealId ingId)
+            forM_ mealSettingsTags $ \tag -> do
+              mTagId <- liftIO (getMealTagId systemEnvDatabase tag)
+              case mTagId of
+                Nothing -> pure ()
+                Just tagId -> insert_ (MealTagRelation mealId tagId)
+            pure (Just mealId)
+
 -- setMeal :: AuthToken -> StoredMenuId -> StoredMealId -> MealSettings -> AppM Bool
 
 
