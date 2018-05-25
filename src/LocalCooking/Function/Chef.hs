@@ -186,109 +186,72 @@ setChef authToken ChefSettings{..} = do
 
 getMenus :: AuthToken -> AppM (Maybe ([(StoredMenuId, MenuSettings)]))
 getMenus authToken = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
-        Nothing -> pure Nothing
-        Just k -> do
-          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
-          if not isAuthorized
-            then pure Nothing
-            else flip runSqlPool systemEnvDatabase $ do
-              mChefEnt <- getBy (UniqueChefOwner k)
-              case mChefEnt of
-                Nothing -> pure Nothing
-                Just (Entity chefId _) -> do
-                  xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
-                  fmap Just
-                    $ forM xs $ \(Entity menuId (StoredMenu pub dead head desc imgs _)) -> do
-                        tags <- do
-                          xs <- selectList [MenuTagRelationMenuTagMenu ==. menuId] []
-                          fmap catMaybes $ forM xs $ \(Entity _ (MenuTagRelation _ tagId)) ->
-                            liftIO (getMealTagById systemEnvDatabase tagId)
-                        pure
-                          ( menuId
-                          , MenuSettings
-                            { menuSettingsPublished = pub
-                            , menuSettingsDeadline = dead
-                            , menuSettingsHeading = head
-                            , menuSettingsDescription = desc
-                            , menuSettingsImages = imgs
-                            , menuSettingsTags = tags
-                            }
-                          )
+  mChef <- getChefFromAuthToken authToken
+  case mChef of
+    Nothing -> pure Nothing
+    Just (chefId, _) -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
+        fmap Just
+          $ forM xs $ \(Entity menuId (StoredMenu pub dead head desc imgs _)) -> do
+              tags <- do
+                xs <- selectList [MenuTagRelationMenuTagMenu ==. menuId] []
+                fmap catMaybes $ forM xs $ \(Entity _ (MenuTagRelation _ tagId)) ->
+                  liftIO (getMealTagById systemEnvDatabase tagId)
+              pure
+                ( menuId
+                , MenuSettings
+                  { menuSettingsPublished = pub
+                  , menuSettingsDeadline = dead
+                  , menuSettingsHeading = head
+                  , menuSettingsDescription = desc
+                  , menuSettingsImages = imgs
+                  , menuSettingsTags = tags
+                  }
+                )
 
 
 newMenu :: AuthToken -> MenuSettings -> AppM (Maybe StoredMenuId)
 newMenu authToken MenuSettings{..} = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
-        Nothing -> pure Nothing
-        Just k -> do
-          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
-          if not isAuthorized
-            then pure Nothing
-            else flip runSqlPool systemEnvDatabase $ do
-              mChefEnt <- getBy (UniqueChefOwner k)
-              case mChefEnt of
-                Nothing -> pure Nothing
-                Just (Entity chefId _) -> do
-                  menuId <- insert $ StoredMenu
-                    menuSettingsPublished
-                    menuSettingsDeadline
-                    menuSettingsHeading
-                    menuSettingsDescription
-                    menuSettingsImages
-                    chefId
-                  forM_ menuSettingsTags $ \tag -> do
-                    mTagId <- liftIO (getMealTagId systemEnvDatabase tag)
-                    case mTagId of
-                      Nothing -> pure ()
-                      Just tagId -> insert_ (MenuTagRelation menuId tagId)
-                  pure (Just menuId)
+  mChef <- getChefFromAuthToken authToken
+  case mChef of
+    Nothing -> pure Nothing
+    Just (chefId, _) -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        menuId <- insert $ StoredMenu
+          menuSettingsPublished
+          menuSettingsDeadline
+          menuSettingsHeading
+          menuSettingsDescription
+          menuSettingsImages
+          chefId
+        forM_ menuSettingsTags $ \tag -> do
+          mTagId <- liftIO (getMealTagId systemEnvDatabase tag)
+          case mTagId of
+            Nothing -> pure ()
+            Just tagId -> insert_ (MenuTagRelation menuId tagId)
+        pure (Just menuId)
 
 
 setMenu :: AuthToken -> StoredMenuId -> MenuSettings -> AppM Bool
 setMenu authToken menuId MenuSettings{..} = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
-        Nothing -> pure False
-        Just k -> do
-          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
-          if not isAuthorized
-            then pure False
-            else do
-              ok <- flip runSqlPool systemEnvDatabase $ do
-                mChefEnt <- getBy (UniqueChefOwner k)
-                case mChefEnt of
-                  Nothing -> pure False
-                  Just (Entity chefId _) -> do
-                    update menuId
-                      [ StoredMenuStoredMenuPublished =. menuSettingsPublished
-                      , StoredMenuStoredMenuDeadline =. menuSettingsDeadline
-                      , StoredMenuStoredMenuHeading =. menuSettingsHeading
-                      , StoredMenuStoredMenuDescription =. menuSettingsDescription
-                      , StoredMenuStoredMenuImages =. menuSettingsImages
-                      ]
-
-                    pure True
-              if not ok
-                then pure False
-                else do
-                  assignMenuTags menuId menuSettingsTags
-
-                  pure True
+  mChef <- getChefFromAuthToken authToken
+  case mChef of
+    Nothing -> pure False
+    Just (chefId, _) -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      liftIO $ flip runSqlPool systemEnvDatabase $
+        update menuId
+          [ StoredMenuStoredMenuPublished =. menuSettingsPublished
+          , StoredMenuStoredMenuDeadline =. menuSettingsDeadline
+          , StoredMenuStoredMenuHeading =. menuSettingsHeading
+          , StoredMenuStoredMenuDescription =. menuSettingsDescription
+          , StoredMenuStoredMenuImages =. menuSettingsImages
+          ]
+      assignMenuTags menuId menuSettingsTags
+      pure True
 
 
 -- getMeals :: AuthToken -> StoredMenuId -> AppM [(StoredMealId, MealSettings)]
