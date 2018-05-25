@@ -290,7 +290,6 @@ getMenuMealSynopses menuId = do
 browseChef :: Permalink -> AppM (Maybe Chef)
 browseChef chefPermalink = do
   SystemEnv{systemEnvDatabase,systemEnvReviews} <- ask
-
   mDeets <- flip runSqlPool systemEnvDatabase $ do
     mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
     case mChefEnt of
@@ -310,7 +309,6 @@ browseChef chefPermalink = do
             liftIO (modifyIORef countRef (+ n))
           liftIO (readIORef countRef)
         pure $ Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders)
-        -- FIXME TODO reviews engine - skimming the top for chefs, but still accum the rating value. Same w/ meals
 
   case mDeets of
     Nothing -> pure Nothing
@@ -429,69 +427,61 @@ browseMeal chefPermalink deadline mealPermalink = do
 
 getCart :: AuthToken -> AppM [(StoredMealId, Int, UTCTime)]
 getCart authToken = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure []
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      liftIO $ flip runSqlPool systemEnvDatabase $
+        fmap (fmap (\(Entity _ (CartRelation _ mealId vol time)) -> (mealId,vol,time)))
+          $ selectList [CartRelationCartRelationCustomer ==. userId] []
 
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
-        Nothing -> pure []
-        Just userId -> liftIO $ flip runSqlPool systemEnvDatabase $
-          fmap (fmap (\(Entity _ (CartRelation _ mealId vol time)) -> (mealId,vol,time)))
-            $ selectList [CartRelationCartRelationCustomer ==. userId] []
-            
 
 
 addToCart :: AuthToken -> Permalink -> Day -> Permalink -> Int -> AppM Bool
 addToCart authToken chefPermalink deadline mealPermalink vol = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      mMealId <- liftIO (getMealId systemEnvDatabase chefPermalink deadline mealPermalink)
+      case mMealId of
         Nothing -> pure False
-        Just userId -> do
-          mMealId <- liftIO (getMealId systemEnvDatabase chefPermalink deadline mealPermalink)
-          case mMealId of
-            Nothing -> pure False
-            Just mealId -> do
-              now <- liftIO getCurrentTime
-              liftIO $ flip runSqlPool systemEnvDatabase $ do
-                mEntry <- getBy (UniqueCartRelation userId mealId)
-                case mEntry of
-                  Nothing ->
-                    insert_ (CartRelation userId mealId vol now)
-                  Just (Entity cartId (CartRelation _ _ oldVol _)) ->
-                    update cartId
-                      [ CartRelationCartRelationVolume =. (vol + oldVol)
-                      , CartRelationCartRelationAdded =. now
-                      ]
-              pure True
+        Just mealId -> do
+          now <- liftIO getCurrentTime
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            mEntry <- getBy (UniqueCartRelation userId mealId)
+            case mEntry of
+              Nothing ->
+                insert_ (CartRelation userId mealId vol now)
+              Just (Entity cartId (CartRelation _ _ oldVol _)) ->
+                update cartId
+                  [ CartRelationCartRelationVolume =. (vol + oldVol)
+                  , CartRelationCartRelationAdded =. now
+                  ]
+          pure True
 
 -- checkout :: ?
 
 getOrders :: AuthToken -> AppM (Maybe [Order])
 getOrders authToken = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} -> do
-      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
-      case mUserId of
-        Nothing -> pure Nothing
-        Just k -> do
-          xs <- flip runSqlPool systemEnvDatabase $
-            selectList [StoredOrderStoredOrderCustomer ==. k] []
-          fmap (Just . catMaybes) $
-            forM xs $ \(Entity _ (StoredOrder _ mealId _ _ vol progress time)) -> do
-              mMealSynopsis <- getMealSynopsis mealId
-              case mMealSynopsis of
-                Nothing -> pure Nothing
-                Just meal ->
-                  pure $ Just Order
-                    { orderMeal = meal
-                    , orderProgress = progress
-                    , orderTime = time
-                    , orderVolume = vol
-                    }
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      xs <- flip runSqlPool systemEnvDatabase $
+        selectList [StoredOrderStoredOrderCustomer ==. userId] []
+      fmap (Just . catMaybes) $
+        forM xs $ \(Entity _ (StoredOrder _ mealId _ _ vol progress time)) -> do
+          mMealSynopsis <- getMealSynopsis mealId
+          case mMealSynopsis of
+            Nothing -> pure Nothing
+            Just meal ->
+              pure $ Just Order
+                { orderMeal = meal
+                , orderProgress = progress
+                , orderTime = time
+                , orderVolume = vol
+                }
