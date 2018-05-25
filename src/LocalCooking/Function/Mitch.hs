@@ -29,6 +29,7 @@ import LocalCooking.Database.Query.IngredientDiet
   , getIngredientById, getIngredientNameById, getIngredientByName)
 import LocalCooking.Database.Query.Tag.Chef (getChefTagById)
 import LocalCooking.Database.Query.Tag.Meal (getMealTagById)
+import LocalCooking.Database.Query.Semantics (getMealId)
 import LocalCooking.Database.Schema.User.Customer
   ( StoredDietPreference (..)
   , StoredCustomer (..), StoredAllergy (..)
@@ -43,6 +44,7 @@ import LocalCooking.Database.Schema.Semantics
   ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
   , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..), MealIngredient (..)
+  , CartRelation (..)
   , EntityField
     ( MenuTagRelationMenuTagMenu, StoredMenuStoredMenuAuthor
     , StoredOrderStoredOrderChef, StoredMenuStoredMenuDeadline
@@ -51,15 +53,17 @@ import LocalCooking.Database.Schema.Semantics
     , StoredOrderStoredOrderProgress, StoredOrderStoredOrderMeal
     , StoredMealStoredMealMenu, StoredReviewStoredReviewMeal
     , MealIngredientMealIngredientMeal
+    , CartRelationCartRelationAdded, CartRelationCartRelationVolume
+    , CartRelationCartRelationCustomer
     )
-  , Unique (UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline)
+  , Unique (UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline, UniqueCartRelation)
   )
 
 import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
 import Data.Text.Permalink (Permalink)
 import Data.IORef (newIORef, readIORef, modifyIORef)
-import Data.Time (getCurrentTime, utctDay)
+import Data.Time (UTCTime, getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -414,7 +418,47 @@ browseMeal chefPermalink deadline mealPermalink = do
             }
 
 
--- addToCart :: Permalink -> Day -> Permalink -> Int -> AppM Bool
+getCart :: AuthToken -> AppM [(StoredMealId, Int, UTCTime)]
+getCart authToken = do
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+
+  case systemEnvTokenContexts of
+    TokenContexts{tokenContextAuth} -> do
+      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
+      case mUserId of
+        Nothing -> pure []
+        Just userId -> liftIO $ flip runSqlPool systemEnvDatabase $
+          fmap (fmap (\(Entity _ (CartRelation _ mealId vol time)) -> (mealId,vol,time)))
+            $ selectList [CartRelationCartRelationCustomer ==. userId] []
+            
+
+
+addToCart :: AuthToken -> Permalink -> Day -> Permalink -> Int -> AppM Bool
+addToCart authToken chefPermalink deadline mealPermalink vol = do
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+
+  case systemEnvTokenContexts of
+    TokenContexts{tokenContextAuth} -> do
+      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
+      case mUserId of
+        Nothing -> pure False
+        Just userId -> do
+          mMealId <- liftIO (getMealId systemEnvDatabase chefPermalink deadline mealPermalink)
+          case mMealId of
+            Nothing -> pure False
+            Just mealId -> do
+              now <- liftIO getCurrentTime
+              liftIO $ flip runSqlPool systemEnvDatabase $ do
+                mEntry <- getBy (UniqueCartRelation userId mealId)
+                case mEntry of
+                  Nothing ->
+                    insert_ (CartRelation userId mealId vol now)
+                  Just (Entity cartId (CartRelation _ _ oldVol _)) ->
+                    update cartId
+                      [ CartRelationCartRelationVolume =. (vol + oldVol)
+                      , CartRelationCartRelationAdded =. now
+                      ]
+              pure True
 
 -- checkout :: ?
 

@@ -330,4 +330,4 @@ setMenu authToken menuId MenuSettings{..} = do
 -- getMeals
 
 
--- setMeal :: AuthToken -> StoredMenuId -> MealSettings -> AppM (Maybe StoredMealId)
+-- newMeal :: AuthToken -> StoredMenuId -> MealSettings -> AppM (Maybe StoredMealId)
