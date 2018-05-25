@@ -99,7 +99,7 @@ getChef authToken = do
                     }
 
 
--- TODO FIXME separate validation routines for each statefully discrepented field?
+-- TODO FIXME separate validation routines for each stateful field?
 
 
 
