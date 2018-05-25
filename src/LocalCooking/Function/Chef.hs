@@ -12,8 +12,7 @@ import LocalCooking.Function.Semantics
   ( getChefTags, getMealTags, getMenuTags, getMealIngredientsDiets
   , assignChefTags, assignMealTags, assignMenuTags, assignMealIngredients
   )
-import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), getUserId)
-import LocalCooking.Function.System.AccessToken (lookupAccess)
+import LocalCooking.Function.System (AppM, SystemEnv (..), getUserId, guardRole)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
@@ -43,39 +42,46 @@ import LocalCooking.Database.Schema.Semantics
     , UniqueMealPermalink, UniqueMenuDeadline)
   )
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
-import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId, getMealTagById)
-import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId, getChefTagById)
+import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId)
+import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId)
 import LocalCooking.Database.Query.IngredientDiet (getStoredIngredientId)
 
-import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
 import Control.Monad (forM_, forM)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, deleteWhere, update, get)
+import Database.Persist.Class (selectList, getBy, insert, insert_, update, get)
 
 
 
 addMealTag :: AuthToken -> MealTag -> AppM Bool
 addMealTag authToken tag = do
-  isAuthorized <- hasChefRole authToken
-  if not isAuthorized
-    then pure False
-    else do
-      SystemEnv{systemEnvDatabase} <- ask
-      True <$ liftIO (insertMealTag systemEnvDatabase tag)
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      isAuthorized <- guardRole userId Chef
+      if not isAuthorized
+        then pure False
+        else do
+          SystemEnv{systemEnvDatabase} <- ask
+          True <$ liftIO (insertMealTag systemEnvDatabase tag)
 
 
 addChefTag :: AuthToken -> ChefTag -> AppM Bool
 addChefTag authToken tag = do
-  isAuthorized <- hasChefRole authToken
-  if not isAuthorized
-    then pure False
-    else do
-      SystemEnv{systemEnvDatabase} <- ask
-      True <$ liftIO (insertChefTag systemEnvDatabase tag)
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      isAuthorized <- guardRole userId Chef
+      if not isAuthorized
+        then pure False
+        else do
+          SystemEnv{systemEnvDatabase} <- ask
+          True <$ liftIO (insertChefTag systemEnvDatabase tag)
 
 
 
@@ -87,18 +93,18 @@ getChef authToken = do
     Just (chefId, StoredChef _ name permalink bio images avatar) -> do
       SystemEnv{systemEnvDatabase} <- ask
       liftIO $ flip runSqlPool systemEnvDatabase $ do
-        tags <- do
-          tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
-          fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
-            liftIO (getChefTagById systemEnvDatabase tagId)
-        pure $ Just ChefSettings
-          { chefSettingsName = name
-          , chefSettingsPermalink = permalink
-          , chefSettingsImages = images
-          , chefSettingsAvatar = avatar
-          , chefSettingsBio = bio
-          , chefSettingsTags = tags
-          }
+        mTags <- liftIO (getChefTags systemEnvDatabase chefId)
+        case mTags of
+          Nothing -> pure Nothing
+          Just tags ->
+            pure $ Just ChefSettings
+              { chefSettingsName = name
+              , chefSettingsPermalink = permalink
+              , chefSettingsImages = images
+              , chefSettingsAvatar = avatar
+              , chefSettingsBio = bio
+              , chefSettingsTags = tags
+              }
 
 
 -- TODO FIXME separate validation routines for each stateful field?
@@ -149,23 +155,23 @@ getMenus authToken = do
       SystemEnv{systemEnvDatabase} <- ask
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
-        fmap Just
-          $ forM xs $ \(Entity menuId (StoredMenu pub dead head desc imgs _)) -> do
-              tags <- do
-                xs <- selectList [MenuTagRelationMenuTagMenu ==. menuId] []
-                fmap catMaybes $ forM xs $ \(Entity _ (MenuTagRelation _ tagId)) ->
-                  liftIO (getMealTagById systemEnvDatabase tagId)
-              pure
-                ( menuId
-                , MenuSettings
-                  { menuSettingsPublished = pub
-                  , menuSettingsDeadline = dead
-                  , menuSettingsHeading = head
-                  , menuSettingsDescription = desc
-                  , menuSettingsImages = imgs
-                  , menuSettingsTags = tags
-                  }
-                )
+        fmap (Just . catMaybes)
+          $ forM xs $ \(Entity menuId (StoredMenu pub dead heading desc imgs _)) -> do
+              mTags <- liftIO (getMenuTags systemEnvDatabase menuId)
+              case mTags of
+                Nothing -> pure Nothing
+                Just tags ->
+                  pure $ Just
+                    ( menuId
+                    , MenuSettings
+                      { menuSettingsPublished = pub
+                      , menuSettingsDeadline = dead
+                      , menuSettingsHeading = heading
+                      , menuSettingsDescription = desc
+                      , menuSettingsImages = imgs
+                      , menuSettingsTags = tags
+                      }
+                    )
 
 
 newMenu :: AuthToken -> MenuSettings -> AppM (Maybe StoredMenuId)
@@ -197,10 +203,10 @@ newMenu authToken MenuSettings{..} = do
 
 setMenu :: AuthToken -> StoredMenuId -> MenuSettings -> AppM Bool
 setMenu authToken menuId MenuSettings{..} = do
-  mChef <- getChefFromAuthToken authToken
-  case mChef of
-    Nothing -> pure False
-    Just (chefId, _) -> do
+  isAuthorized <- verifyChefhood authToken
+  if not isAuthorized
+    then pure False
+    else do
       SystemEnv{systemEnvDatabase} <- ask
       ok <- liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- get menuId
@@ -224,10 +230,10 @@ setMenu authToken menuId MenuSettings{..} = do
 
 getMeals :: AuthToken -> StoredMenuId -> AppM (Maybe [(StoredMealId, MealSettings)])
 getMeals authToken menuId = do
-  mChef <- getChefFromAuthToken authToken
-  case mChef of
-    Nothing -> pure Nothing
-    Just (chefId,_) -> do
+  isAuthorized <- verifyChefhood authToken
+  if not isAuthorized
+    then pure Nothing
+    else do
       SystemEnv{systemEnvDatabase} <- ask
       xs <- liftIO $ flip runSqlPool systemEnvDatabase $
         selectList [StoredMealStoredMealMenu ==. menuId] []
@@ -259,10 +265,10 @@ getMeals authToken menuId = do
 
 newMeal :: AuthToken -> StoredMenuId -> MealSettings -> AppM (Maybe StoredMealId)
 newMeal authToken menuId MealSettings{..} = do
-  mChef <- getChefFromAuthToken authToken
-  case mChef of
-    Nothing -> pure Nothing
-    Just (chefId,_) -> do
+  isAuthorized <- verifyChefhood authToken
+  if not isAuthorized
+    then pure Nothing
+    else do
       SystemEnv{systemEnvDatabase} <- ask
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- getBy (UniqueMealPermalink menuId mealSettingsPermalink)
@@ -293,10 +299,10 @@ newMeal authToken menuId MealSettings{..} = do
 
 setMeal :: AuthToken -> StoredMenuId -> StoredMealId -> MealSettings -> AppM Bool
 setMeal authToken menuId mealId MealSettings{..} = do
-  mChef <- getChefFromAuthToken authToken
-  case mChef of
-    Nothing -> pure False
-    Just (chefId,_) -> do
+  isAuthorized <- verifyChefhood authToken
+  if not isAuthorized
+    then pure False
+    else do
       SystemEnv{systemEnvDatabase} <- ask
       ok <- liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- get mealId
@@ -322,13 +328,12 @@ setMeal authToken menuId mealId MealSettings{..} = do
           pure True
 
 
-hasChefRole :: AuthToken -> AppM Bool
-hasChefRole authToken = do
-  SystemEnv{systemEnvDatabase} <- ask
+verifyChefhood :: AuthToken -> AppM Bool
+verifyChefhood authToken = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
-    Just userId -> liftIO (hasRole systemEnvDatabase userId Chef)
+    Just userId -> guardRole userId Chef
 
 
 getChefFromAuthToken :: AuthToken -> AppM (Maybe (StoredChefId, StoredChef))

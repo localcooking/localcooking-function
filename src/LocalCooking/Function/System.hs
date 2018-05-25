@@ -14,6 +14,7 @@ module LocalCooking.Function.System
   , TokenContexts (..)
   , Keys (..)
   , getUserId
+  , guardRole
   ) where
 
 import LocalCooking.Function.System.AccessToken (AccessTokenContext, newAccessTokenContext, expireThread, lookupAccess)
@@ -21,8 +22,10 @@ import LocalCooking.Function.System.Review (ReviewAccumulator, newReviewAccumula
 import LocalCooking.Common.AccessToken.Email (EmailToken)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Password (HashedPassword)
+import LocalCooking.Common.User.Role (UserRole)
 import LocalCooking.Database.Schema.User (StoredUserId)
 import LocalCooking.Database.Query.Salt (getPasswordSalt)
+import LocalCooking.Database.Query.Semantics.Admin (hasRole)
 import Facebook.App (FacebookAppCredentials)
 import Google.Keys (GoogleCredentials)
 import SparkPost.Keys (SparkPostCredentials)
@@ -202,3 +205,9 @@ getUserId authToken = do
   case systemEnvTokenContexts of
     TokenContexts{tokenContextAuth} ->
       liftIO (lookupAccess tokenContextAuth authToken)
+
+
+guardRole :: StoredUserId -> UserRole -> AppM Bool
+guardRole userId r = do
+  SystemEnv{systemEnvDatabase} <- ask
+  liftIO (hasRole systemEnvDatabase userId r)

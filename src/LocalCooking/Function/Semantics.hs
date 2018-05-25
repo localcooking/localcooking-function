@@ -1,25 +1,10 @@
 {-# LANGUAGE
     NamedFieldPuns
-  , RecordWildCards
   , ScopedTypeVariables
   #-}
 
 module LocalCooking.Function.Semantics where
 
-import LocalCooking.Semantics.Mitch
-  ( Customer (..)
-  , Review (..)
-  , Chef (..), ChefSynopsis (..)
-  , MenuSynopsis (..), Menu (..)
-  , MealSynopsis (..), Meal (..)
-  , Order (..)
-  , getReviewSynopsis
-  )
-import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), getUserId)
-import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
-import LocalCooking.Function.System.AccessToken (lookupAccess)
-import LocalCooking.Common.AccessToken.Auth (AuthToken)
-import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.Ingredient (IngredientName)
@@ -27,61 +12,45 @@ import LocalCooking.Common.Diet (Diet)
 import LocalCooking.Database.Query.IngredientDiet
   ( getDietId, getDiets
   , getStoredIngredientId, getIngredientViolations
-  , getIngredientById, getIngredientNameById, getIngredientByName)
+  , getIngredientNameById)
 import LocalCooking.Database.Query.Tag.Chef (getChefTagById, getChefTagId)
 import LocalCooking.Database.Query.Tag.Meal (getMealTagById, getMealTagId)
-import LocalCooking.Database.Query.Semantics (getMealId)
 import LocalCooking.Database.Schema.User.Customer
   ( StoredDietPreference (..)
-  , StoredCustomer (..), StoredAllergy (..)
+  , StoredAllergy (..)
   , StoredCustomerId
   , EntityField
     ( StoredDietPreferenceDietPreferenceOwner
-    , StoredDietPreferenceDietPreferenceDiet, StoredCustomerStoredCustomerAddress
-    , StoredCustomerStoredCustomerName
     , StoredAllergyAllergy, StoredAllergyAllergyOwner
     )
-  , Unique (UniqueCustomer, UniqueDietPreference))
+  , Unique (UniqueDietPreference))
 import LocalCooking.Database.Schema.Semantics
-  ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
-  , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId
+  ( StoredChefId, StoredMealId, StoredMenuId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..), MealIngredient (..)
-  , CartRelation (..)
   , EntityField
-    ( MenuTagRelationMenuTagMenu, StoredMenuStoredMenuAuthor
-    , StoredOrderStoredOrderChef, StoredMenuStoredMenuDeadline
-    , StoredOrderStoredOrderMenu, ChefTagRelationChefTagChef
-    , StoredOrderStoredOrderCustomer, MealTagRelationMealTagMeal
-    , StoredOrderStoredOrderProgress, StoredOrderStoredOrderMeal
-    , StoredMealStoredMealMenu, StoredReviewStoredReviewMeal
+    ( MenuTagRelationMenuTagMenu
+    , ChefTagRelationChefTagChef
+    , MealTagRelationMealTagMeal
     , MealIngredientMealIngredientMeal
-    , CartRelationCartRelationAdded, CartRelationCartRelationVolume
-    , CartRelationCartRelationCustomer
     )
   , Unique
-    ( UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline, UniqueCartRelation
-    , UniqueMealTag, UniqueChefTag, UniqueMenuTag, UniqueMealIngredient
+    ( UniqueMealTag, UniqueChefTag, UniqueMenuTag, UniqueMealIngredient
     )
   )
 
 import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
-import Data.Text.Permalink (Permalink)
-import Data.IORef (newIORef, readIORef, modifyIORef)
-import Data.Time (UTCTime, getCurrentTime, utctDay)
-import Data.Time.Calendar (Day)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Reader (ask)
-import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
+import Database.Persist (Entity (..), (==.))
 import Database.Persist.Sql (runSqlPool, ConnectionPool)
-import Database.Persist.Class (selectList, get, getBy, insert, insert_, deleteBy, deleteWhere, update, count)
+import Database.Persist.Class (selectList, get, insert_, deleteBy, deleteWhere)
 
 
 
 -- | Returns the set of non-violated diets, and used ingredients per diet
 getMealIngredientsDiets :: ConnectionPool -> StoredMealId -> IO (Maybe ([IngredientName],[Diet]))
-getMealIngredientsDiets systemEnvDatabase mealId = do
+getMealIngredientsDiets systemEnvDatabase mealId =
   flip runSqlPool systemEnvDatabase $ do
     mMeal <- get mealId
     case mMeal of
@@ -104,7 +73,7 @@ getMealIngredientsDiets systemEnvDatabase mealId = do
 
 
 getMealTags :: ConnectionPool -> StoredMealId -> IO (Maybe [MealTag])
-getMealTags systemEnvDatabase mealId = do
+getMealTags systemEnvDatabase mealId =
   flip runSqlPool systemEnvDatabase $ do
     mEnt <- get mealId
     case mEnt of
@@ -116,7 +85,7 @@ getMealTags systemEnvDatabase mealId = do
 
 
 getMenuTags :: ConnectionPool -> StoredMenuId -> IO (Maybe [MealTag])
-getMenuTags systemEnvDatabase menuId = do
+getMenuTags systemEnvDatabase menuId =
   flip runSqlPool systemEnvDatabase $ do
     mEnt <- get menuId
     case mEnt of
@@ -128,7 +97,7 @@ getMenuTags systemEnvDatabase menuId = do
 
 
 getChefTags :: ConnectionPool -> StoredChefId -> IO (Maybe [ChefTag])
-getChefTags systemEnvDatabase chefId = do
+getChefTags systemEnvDatabase chefId =
   flip runSqlPool systemEnvDatabase $ do
     mEnt <- get chefId
     case mEnt of
@@ -141,7 +110,7 @@ getChefTags systemEnvDatabase chefId = do
 
 
 assignChefTags :: ConnectionPool -> StoredChefId -> [ChefTag] -> IO ()
-assignChefTags systemEnvDatabase chefId chefSettingsTags = do
+assignChefTags systemEnvDatabase chefId chefSettingsTags =
   flip runSqlPool systemEnvDatabase $ do
     oldTags <- fmap (fmap (\(Entity _ (ChefTagRelation _ t)) -> t))
               $ selectList [ChefTagRelationChefTagChef ==. chefId] []
@@ -159,7 +128,7 @@ assignChefTags systemEnvDatabase chefId chefSettingsTags = do
 
 
 assignMenuTags :: ConnectionPool -> StoredMenuId -> [MealTag] -> IO ()
-assignMenuTags systemEnvDatabase menuId menuSettingsTags = do
+assignMenuTags systemEnvDatabase menuId menuSettingsTags =
   flip runSqlPool systemEnvDatabase $ do
     oldTags <- fmap (fmap (\(Entity _ (MenuTagRelation _ t)) -> t))
               $ selectList [MenuTagRelationMenuTagMenu ==. menuId] []
@@ -176,7 +145,7 @@ assignMenuTags systemEnvDatabase menuId menuSettingsTags = do
 
 
 assignMealTags :: ConnectionPool -> StoredMealId -> [MealTag] -> IO ()
-assignMealTags systemEnvDatabase mealId mealSettingsTags = do
+assignMealTags systemEnvDatabase mealId mealSettingsTags =
   flip runSqlPool systemEnvDatabase $ do
     oldTags <- fmap (fmap (\(Entity _ (MealTagRelation _ t)) -> t))
               $ selectList [MealTagRelationMealTagMeal ==. mealId] []
@@ -194,7 +163,7 @@ assignMealTags systemEnvDatabase mealId mealSettingsTags = do
 
 
 assignMealIngredients :: ConnectionPool -> StoredMealId -> [IngredientName] -> IO ()
-assignMealIngredients systemEnvDatabase mealId mealSettingsIngredients = do
+assignMealIngredients systemEnvDatabase mealId mealSettingsIngredients =
   flip runSqlPool systemEnvDatabase $ do
     oldIngs <- fmap (fmap (\(Entity _ (MealIngredient _ t)) -> t))
               $ selectList [MealIngredientMealIngredientMeal ==. mealId] []
@@ -208,3 +177,35 @@ assignMealIngredients systemEnvDatabase mealId mealSettingsIngredients = do
       deleteBy (UniqueMealIngredient mealId t)
     forM_ toAdd $ \t ->
       insert_ (MealIngredient mealId t)
+
+
+assignDiets :: ConnectionPool -> StoredCustomerId -> [Diet] -> IO ()
+assignDiets systemEnvDatabase custId customerDiets =
+  flip runSqlPool systemEnvDatabase $ do
+    oldDiets <- fmap (fmap (\(Entity _ (StoredDietPreference _ d)) -> d))
+              $ selectList [StoredDietPreferenceDietPreferenceOwner ==. custId] []
+    newDiets <- fmap catMaybes $ forM customerDiets $ \d ->
+                liftIO (getDietId systemEnvDatabase d)
+    let toRemove = Set.fromList oldDiets `Set.difference` Set.fromList newDiets
+        toAdd = Set.fromList newDiets `Set.difference` Set.fromList oldDiets
+    forM_ toRemove $ \d ->
+      deleteBy (UniqueDietPreference custId d)
+    forM_ toAdd $ \d ->
+      insert_ (StoredDietPreference custId d)
+
+
+
+assignAllergies :: ConnectionPool -> StoredCustomerId -> [IngredientName] -> IO ()
+assignAllergies systemEnvDatabase custId customerAllergies =
+  flip runSqlPool systemEnvDatabase $ do
+    oldAllergys <- fmap (fmap (\(Entity _ (StoredAllergy _ d)) -> d))
+                $ selectList [StoredAllergyAllergyOwner ==. custId] []
+    newAllergys <- fmap catMaybes $ forM customerAllergies $ \i ->
+                  liftIO (getStoredIngredientId systemEnvDatabase i)
+    let toRemove = Set.fromList oldAllergys `Set.difference` Set.fromList newAllergys
+        toAdd = Set.fromList newAllergys `Set.difference` Set.fromList oldAllergys
+    forM_ toRemove $ \i -> deleteWhere
+      [ StoredAllergyAllergyOwner ==. custId
+      , StoredAllergyAllergy ==. i
+      ]
+    forM_ toAdd $ \i -> insert_ (StoredAllergy custId i)

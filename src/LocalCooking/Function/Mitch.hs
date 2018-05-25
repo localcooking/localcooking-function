@@ -15,53 +15,38 @@ import LocalCooking.Semantics.Mitch
   , Order (..)
   , getReviewSynopsis
   )
-import LocalCooking.Function.Semantics (getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags)
-import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), getUserId)
+import LocalCooking.Function.Semantics
+  (getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags, assignAllergies, assignDiets)
+import LocalCooking.Function.System (AppM, SystemEnv (..), getUserId)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
-import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
-import LocalCooking.Common.Tag.Meal (MealTag)
-import LocalCooking.Common.Ingredient (IngredientName)
-import LocalCooking.Common.Diet (Diet)
-import LocalCooking.Database.Query.IngredientDiet
-  ( getDietId, getDiets
-  , getStoredIngredientId, getIngredientViolations
-  , getIngredientById, getIngredientNameById, getIngredientByName)
-import LocalCooking.Database.Query.Tag.Chef (getChefTagById)
-import LocalCooking.Database.Query.Tag.Meal (getMealTagById)
+import LocalCooking.Database.Query.IngredientDiet (getIngredientByName)
 import LocalCooking.Database.Query.Semantics (getMealId)
 import LocalCooking.Database.Schema.User.Customer
-  ( StoredDietPreference (..)
-  , StoredCustomer (..), StoredAllergy (..)
-  , StoredCustomerId
+  ( StoredCustomer (..)
   , EntityField
-    ( StoredDietPreferenceDietPreferenceOwner
-    , StoredDietPreferenceDietPreferenceDiet, StoredCustomerStoredCustomerAddress
+    ( StoredCustomerStoredCustomerAddress
     , StoredCustomerStoredCustomerName
-    , StoredAllergyAllergy, StoredAllergyAllergyOwner
     )
-  , Unique (UniqueCustomer, UniqueDietPreference))
+  , Unique (UniqueCustomer))
 import LocalCooking.Database.Schema.Semantics
   ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
   , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId
-  , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..), MealIngredient (..)
   , CartRelation (..)
   , EntityField
-    ( MenuTagRelationMenuTagMenu, StoredMenuStoredMenuAuthor
+    ( StoredMenuStoredMenuAuthor
     , StoredOrderStoredOrderChef, StoredMenuStoredMenuDeadline
-    , StoredOrderStoredOrderMenu, ChefTagRelationChefTagChef
-    , StoredOrderStoredOrderCustomer, MealTagRelationMealTagMeal
+    , StoredOrderStoredOrderMenu
+    , StoredOrderStoredOrderCustomer
     , StoredOrderStoredOrderProgress, StoredOrderStoredOrderMeal
     , StoredMealStoredMealMenu, StoredReviewStoredReviewMeal
-    , MealIngredientMealIngredientMeal
     , CartRelationCartRelationAdded, CartRelationCartRelationVolume
     , CartRelationCartRelationCustomer
     )
   , Unique (UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline, UniqueCartRelation)
   )
 
-import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
 import Data.Text.Permalink (Permalink)
 import Data.IORef (newIORef, readIORef, modifyIORef)
@@ -72,44 +57,8 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
 import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, get, getBy, insert, insert_, deleteBy, deleteWhere, update, count)
+import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, count)
 
-
-
-assignDiets :: StoredCustomerId -> [Diet] -> AppM ()
-assignDiets custId customerDiets = do
-  SystemEnv{systemEnvDatabase} <- ask
-
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
-    oldDiets <- fmap (fmap (\(Entity _ (StoredDietPreference _ d)) -> d))
-              $ selectList [StoredDietPreferenceDietPreferenceOwner ==. custId] []
-    newDiets <- fmap catMaybes $ forM customerDiets $ \d ->
-                liftIO (getDietId systemEnvDatabase d)
-    let toRemove = Set.fromList oldDiets `Set.difference` Set.fromList newDiets
-        toAdd = Set.fromList newDiets `Set.difference` Set.fromList oldDiets
-    forM_ toRemove $ \d ->
-      deleteBy (UniqueDietPreference custId d)
-    forM_ toAdd $ \d ->
-      insert_ (StoredDietPreference custId d)
-
-
-
-assignAllergies :: StoredCustomerId -> [IngredientName] -> AppM ()
-assignAllergies custId customerAllergies = do
-  SystemEnv{systemEnvDatabase} <- ask
-
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
-    oldAllergys <- fmap (fmap (\(Entity _ (StoredAllergy _ d)) -> d))
-                $ selectList [StoredAllergyAllergyOwner ==. custId] []
-    newAllergys <- fmap catMaybes $ forM customerAllergies $ \i ->
-                  liftIO (getStoredIngredientId systemEnvDatabase i)
-    let toRemove = Set.fromList oldAllergys `Set.difference` Set.fromList newAllergys
-        toAdd = Set.fromList newAllergys `Set.difference` Set.fromList oldAllergys
-    forM_ toRemove $ \i -> deleteWhere
-      [ StoredAllergyAllergyOwner ==. custId
-      , StoredAllergyAllergy ==. i
-      ]
-    forM_ toAdd $ \i -> insert_ (StoredAllergy custId i)
 
 
 
@@ -134,9 +83,9 @@ setCustomer authToken Customer{..} = do
             pure (Just custId)
       case mCust of
         Nothing -> pure False
-        Just custId -> do
-          assignDiets custId customerDiets
-          assignAllergies custId customerAllergies
+        Just custId -> liftIO $ do
+          assignDiets systemEnvDatabase custId customerDiets
+          assignAllergies systemEnvDatabase custId customerAllergies
           pure True
 
 
@@ -381,11 +330,11 @@ browseMeal chefPermalink deadline mealPermalink = do
                         case mRating of
                           Nothing -> pure Nothing
                           Just rating ->
-                            pure $ Just (mealId,title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets)
+                            pure $ Just (title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets)
 
   case mStoredMeal of
     Nothing -> pure Nothing
-    Just (mealId,title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets) -> do
+    Just (title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets) -> do
       reviews <- fmap catMaybes $ forM reviewIds getReview
       ings' <- fmap catMaybes $ liftIO $
         forM ings $ getIngredientByName systemEnvDatabase
