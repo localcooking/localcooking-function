@@ -28,8 +28,8 @@ import LocalCooking.Database.Query.IngredientDiet
   ( getDietId, getDiets
   , getStoredIngredientId, getIngredientViolations
   , getIngredientById, getIngredientNameById, getIngredientByName)
-import LocalCooking.Database.Query.Tag.Chef (getChefTagById)
-import LocalCooking.Database.Query.Tag.Meal (getMealTagById)
+import LocalCooking.Database.Query.Tag.Chef (getChefTagById, getChefTagId)
+import LocalCooking.Database.Query.Tag.Meal (getMealTagById, getMealTagId)
 import LocalCooking.Database.Query.Semantics (getMealId)
 import LocalCooking.Database.Schema.User.Customer
   ( StoredDietPreference (..)
@@ -58,7 +58,10 @@ import LocalCooking.Database.Schema.Semantics
     , CartRelationCartRelationAdded, CartRelationCartRelationVolume
     , CartRelationCartRelationCustomer
     )
-  , Unique (UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline, UniqueCartRelation)
+  , Unique
+    ( UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline, UniqueCartRelation
+    , UniqueMealTag, UniqueChefTag, UniqueMenuTag, UniqueMealIngredient
+    )
   )
 
 import qualified Data.Set as Set
@@ -134,3 +137,74 @@ getChefTags systemEnvDatabase chefId = do
         xs <- selectList [ChefTagRelationChefTagChef ==. chefId] []
         fmap (Just . catMaybes) $ forM xs $ \(Entity _ (ChefTagRelation _ tagId)) ->
           liftIO (getChefTagById systemEnvDatabase tagId)
+
+
+
+assignChefTags :: ConnectionPool -> StoredChefId -> [ChefTag] -> IO ()
+assignChefTags systemEnvDatabase chefId chefSettingsTags = do
+  flip runSqlPool systemEnvDatabase $ do
+    oldTags <- fmap (fmap (\(Entity _ (ChefTagRelation _ t)) -> t))
+              $ selectList [ChefTagRelationChefTagChef ==. chefId] []
+    newTags <- fmap catMaybes $ forM chefSettingsTags $ \t ->
+                liftIO (getChefTagId systemEnvDatabase t)
+
+    let toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
+        toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
+
+    forM_ toRemove $ \t ->
+      deleteBy (UniqueChefTag chefId t)
+    forM_ toAdd $ \t ->
+      insert_ (ChefTagRelation chefId t)
+
+
+
+assignMenuTags :: ConnectionPool -> StoredMenuId -> [MealTag] -> IO ()
+assignMenuTags systemEnvDatabase menuId menuSettingsTags = do
+  flip runSqlPool systemEnvDatabase $ do
+    oldTags <- fmap (fmap (\(Entity _ (MenuTagRelation _ t)) -> t))
+              $ selectList [MenuTagRelationMenuTagMenu ==. menuId] []
+    newTags <- fmap catMaybes $ forM menuSettingsTags $ \t ->
+                liftIO (getMealTagId systemEnvDatabase t)
+
+    let toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
+        toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
+
+    forM_ toRemove $ \t ->
+      deleteBy (UniqueMenuTag menuId t)
+    forM_ toAdd $ \t ->
+      insert_ (MenuTagRelation menuId t)
+
+
+assignMealTags :: ConnectionPool -> StoredMealId -> [MealTag] -> IO ()
+assignMealTags systemEnvDatabase mealId mealSettingsTags = do
+  flip runSqlPool systemEnvDatabase $ do
+    oldTags <- fmap (fmap (\(Entity _ (MealTagRelation _ t)) -> t))
+              $ selectList [MealTagRelationMealTagMeal ==. mealId] []
+    newTags <- fmap catMaybes $ forM mealSettingsTags $ \t ->
+                liftIO (getMealTagId systemEnvDatabase t)
+
+    let toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
+        toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
+
+    forM_ toRemove $ \t ->
+      deleteBy (UniqueMealTag mealId t)
+    forM_ toAdd $ \t ->
+      insert_ (MealTagRelation mealId t)
+
+
+
+assignMealIngredients :: ConnectionPool -> StoredMealId -> [IngredientName] -> IO ()
+assignMealIngredients systemEnvDatabase mealId mealSettingsIngredients = do
+  flip runSqlPool systemEnvDatabase $ do
+    oldIngs <- fmap (fmap (\(Entity _ (MealIngredient _ t)) -> t))
+              $ selectList [MealIngredientMealIngredientMeal ==. mealId] []
+    newIngs <- fmap catMaybes $ forM mealSettingsIngredients $ \t ->
+                liftIO (getStoredIngredientId systemEnvDatabase t)
+
+    let toRemove = Set.fromList oldIngs `Set.difference` Set.fromList newIngs
+        toAdd = Set.fromList newIngs `Set.difference` Set.fromList oldIngs
+
+    forM_ toRemove $ \t ->
+      deleteBy (UniqueMealIngredient mealId t)
+    forM_ toAdd $ \t ->
+      insert_ (MealIngredient mealId t)
