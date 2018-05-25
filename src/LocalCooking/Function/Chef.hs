@@ -28,7 +28,7 @@ import LocalCooking.Database.Schema.Semantics
     )
   , Unique (UniqueChefOwner))
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
-import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagById)
+import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId, getMealTagById)
 import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId, getChefTagById)
 
 import qualified Data.Set as Set
@@ -203,7 +203,37 @@ getMenus authToken = do
                           )
 
 
--- setMenu :: AuthToken -> MenuSettings -> AppM (Maybe StoredMenuId)
+setMenu :: AuthToken -> MenuSettings -> AppM (Maybe StoredMenuId)
+setMenu authToken MenuSettings{..} = do
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+
+  case systemEnvTokenContexts of
+    TokenContexts{tokenContextAuth} -> do
+      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
+      case mUserId of
+        Nothing -> pure Nothing
+        Just k -> do
+          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
+          if not isAuthorized
+            then pure Nothing
+            else flip runSqlPool systemEnvDatabase $ do
+              mChefEnt <- getBy (UniqueChefOwner k)
+              case mChefEnt of
+                Nothing -> pure Nothing
+                Just (Entity chefId _) -> do
+                  menuId <- insert $ StoredMenu
+                    menuSettingsPublished
+                    menuSettingsDeadline
+                    menuSettingsHeading
+                    menuSettingsDescription
+                    menuSettingsImages
+                    chefId
+                  forM_ menuSettingsTags $ \tag -> do
+                    mTagId <- liftIO (getMealTagId systemEnvDatabase tag)
+                    case mTagId of
+                      Nothing -> pure ()
+                      Just tagId -> insert_ (MenuTagRelation menuId tagId)
+                  pure (Just menuId)
 
 
 -- getMeals :: AuthToken -> StoredMenuId -> AppM [(StoredMealId, MealSettings)]
