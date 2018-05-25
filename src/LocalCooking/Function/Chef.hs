@@ -303,30 +303,26 @@ setMenu authToken menuId MenuSettings{..} = do
           isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
           if not isAuthorized
             then pure False
-            else flip runSqlPool systemEnvDatabase $ do
-              mChefEnt <- getBy (UniqueChefOwner k)
-              case mChefEnt of
-                Nothing -> pure False
-                Just (Entity chefId _) -> do
-                  menuId <- insert $ StoredMenu
-                    menuSettingsPublished
-                    menuSettingsDeadline
-                    menuSettingsHeading
-                    menuSettingsDescription
-                    menuSettingsImages
-                    chefId
-                  update menuId
-                    [ StoredMenuStoredMenuPublished =. menuSettingsPublished
-                    , StoredMenuStoredMenuDeadline =. menuSettingsDeadline
-                    , StoredMenuStoredMenuHeading =. menuSettingsHeading
-                    , StoredMenuStoredMenuDescription =. menuSettingsDescription
-                    , StoredMenuStoredMenuImages =. menuSettingsImages
-                    ]
-                  forM_ menuSettingsTags $ \tag -> do
-                    mTagId <- liftIO (getMealTagId systemEnvDatabase tag)
-                    case mTagId of
-                      Nothing -> pure ()
-                      Just tagId -> insert_ (MenuTagRelation menuId tagId)
+            else do
+              ok <- flip runSqlPool systemEnvDatabase $ do
+                mChefEnt <- getBy (UniqueChefOwner k)
+                case mChefEnt of
+                  Nothing -> pure False
+                  Just (Entity chefId _) -> do
+                    update menuId
+                      [ StoredMenuStoredMenuPublished =. menuSettingsPublished
+                      , StoredMenuStoredMenuDeadline =. menuSettingsDeadline
+                      , StoredMenuStoredMenuHeading =. menuSettingsHeading
+                      , StoredMenuStoredMenuDescription =. menuSettingsDescription
+                      , StoredMenuStoredMenuImages =. menuSettingsImages
+                      ]
+
+                    pure True
+              if not ok
+                then pure False
+                else do
+                  assignMenuTags menuId menuSettingsTags
+
                   pure True
 
 
