@@ -15,6 +15,7 @@ import LocalCooking.Semantics.Mitch
   , Order (..)
   , getReviewSynopsis
   )
+import LocalCooking.Function.Semantics (getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags)
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), getUserId)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Function.System.AccessToken (lookupAccess)
@@ -158,30 +159,6 @@ getReview reviewId = do
           }
 
 
--- | Returns the set of non-violated diets, and used ingredients per diet
-getMealIngredientsDiets :: StoredMealId -> AppM (Maybe ([IngredientName],[Diet]))
-getMealIngredientsDiets mealId = do
-  SystemEnv{systemEnvDatabase} <- ask
-
-  flip runSqlPool systemEnvDatabase $ do
-    mMeal <- get mealId
-    case mMeal of
-      Nothing -> pure Nothing
-      Just _ -> do
-        xs <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
-        ( ings
-          , ds :: [Set.Set Diet]
-          ) <- fmap (unzip . catMaybes) $ forM xs $ \(Entity _ (MealIngredient _ ingId)) -> liftIO $ do
-          mIng <- liftIO (getIngredientNameById systemEnvDatabase ingId)
-          case mIng of
-            Nothing -> pure Nothing
-            Just ing -> do
-              diets <- liftIO (getIngredientViolations systemEnvDatabase ingId)
-              pure $ Just (ing,Set.fromList diets)
-        let violated = Set.unions ds
-        allDiets <- Set.fromList <$> liftIO (getDiets systemEnvDatabase)
-        pure $ Just (ings, Set.toList (allDiets `Set.difference` violated))
-
 
 getMealSynopsis :: StoredMealId -> AppM (Maybe MealSynopsis)
 getMealSynopsis mealId = do
@@ -192,19 +169,19 @@ getMealSynopsis mealId = do
     case mMeal of
       Nothing -> pure Nothing
       Just (StoredMeal title permalink _ heading _ _ images price) -> do
-        diets <- do
-          ings <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
-          fmap concat $ forM ings $ \(Entity _ (MealIngredient _ ingId)) ->
-            liftIO (getIngredientViolations systemEnvDatabase ingId)
-        orders <- count
-          [ StoredOrderStoredOrderMeal ==. mealId
-          , StoredOrderStoredOrderProgress !=. DeliveredProgress
-          ]
-        tags <- fmap catMaybes $ do
-          xs <- selectList [MealTagRelationMealTagMeal ==. mealId] []
-          forM xs $ \(Entity _ (MealTagRelation _ tagId)) ->
-            liftIO (getMealTagById systemEnvDatabase tagId)
-        pure $ Just (title,permalink,heading,images,price,diets,orders,tags)
+        mTags <- liftIO (getMealTags systemEnvDatabase mealId)
+        case mTags of
+          Nothing -> pure Nothing
+          Just tags -> do
+            mIngDiets <- liftIO (getMealIngredientsDiets systemEnvDatabase mealId)
+            case mIngDiets of
+              Nothing -> pure Nothing
+              Just (_,diets) -> do
+                orders <- count
+                  [ StoredOrderStoredOrderMeal ==. mealId
+                  , StoredOrderStoredOrderProgress !=. DeliveredProgress
+                  ]
+                pure $ Just (title,permalink,heading,images,price,diets,orders,tags)
   case mCont of
     Nothing -> pure Nothing
     Just (title,permalink,heading,images,price,diets,orders,tags) -> do
@@ -234,11 +211,12 @@ getChefSynopsis chefId = do
     case mChef of
       Nothing -> pure Nothing
       Just (StoredChef _ name permalink _ _ avatar) -> do
-        tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
-        tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
-          liftIO (getChefTagById systemEnvDatabase tagId)
-        orders <- count [StoredOrderStoredOrderChef ==. chefId]
-        pure $ Just (name,permalink,avatar,tags,orders)
+        mTags <- liftIO (getChefTags systemEnvDatabase chefId)
+        case mTags of
+          Nothing -> pure Nothing
+          Just tags -> do
+            orders <- count [StoredOrderStoredOrderChef ==. chefId]
+            pure $ Just (name,permalink,avatar,tags,orders)
   case mStoredChef of
     Nothing -> pure Nothing
     Just (name,permalink,avatar,tags,orders) -> do
@@ -262,19 +240,21 @@ getChefMenuSynopses chefId = do
 
   flip runSqlPool systemEnvDatabase $ do
     xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
-    fmap catMaybes $ forM xs $ \(Entity k (StoredMenu published deadline heading _ images _)) ->
+    fmap catMaybes $ forM xs $ \(Entity menuId (StoredMenu published deadline heading _ images _)) ->
       case published of
         Nothing -> pure Nothing
         Just p -> do
-          tagIds <- fmap (fmap (\(Entity _ (MenuTagRelation _ t)) -> t)) $ selectList [MenuTagRelationMenuTagMenu ==. k] []
-          tags <- fmap catMaybes $ forM tagIds $ \tagId -> liftIO (getMealTagById systemEnvDatabase tagId)
-          pure $ Just MenuSynopsis
-            { menuSynopsisPublished = p
-            , menuSynopsisDeadline = deadline
-            , menuSynopsisHeading = heading
-            , menuSynopsisTags = tags
-            , menuSynopsisImages = images
-            }
+          mTags <- liftIO (getMenuTags systemEnvDatabase menuId)
+          case mTags of
+            Nothing -> pure Nothing
+            Just tags ->
+              pure $ Just MenuSynopsis
+                { menuSynopsisPublished = p
+                , menuSynopsisDeadline = deadline
+                , menuSynopsisHeading = heading
+                , menuSynopsisTags = tags
+                , menuSynopsisImages = images
+                }
 
 
 getMenuMealSynopses :: StoredMenuId -> AppM [MealSynopsis]
@@ -295,20 +275,20 @@ browseChef chefPermalink = do
     case mChefEnt of
       Nothing -> pure Nothing
       Just (Entity chefId (StoredChef _ name permalink bio images _)) -> do
-        tagEnts <- selectList [ChefTagRelationChefTagChef ==. chefId] []
-        tags <- fmap catMaybes $ forM tagEnts $ \(Entity _ (ChefTagRelation _ tagId)) ->
-          liftIO (getChefTagById systemEnvDatabase tagId)
-
-        totalOrders <- count [StoredOrderStoredOrderChef ==. chefId]
-        today <- utctDay <$> liftIO getCurrentTime
-        activeOrders <- do
-          menus <- selectList [StoredMenuStoredMenuDeadline >=. today] []
-          countRef <- liftIO (newIORef 0)
-          forM_ menus $ \(Entity menuId _) -> do
-            n <- count [StoredOrderStoredOrderMenu ==. menuId]
-            liftIO (modifyIORef countRef (+ n))
-          liftIO (readIORef countRef)
-        pure $ Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders)
+        mTags <- liftIO (getChefTags systemEnvDatabase chefId)
+        case mTags of
+          Nothing -> pure Nothing
+          Just tags -> do
+            totalOrders <- count [StoredOrderStoredOrderChef ==. chefId]
+            today <- utctDay <$> liftIO getCurrentTime
+            activeOrders <- do
+              menus <- selectList [StoredMenuStoredMenuDeadline >=. today] []
+              countRef <- liftIO (newIORef 0)
+              forM_ menus $ \(Entity menuId _) -> do
+                n <- count [StoredOrderStoredOrderMenu ==. menuId]
+                liftIO (modifyIORef countRef (+ n))
+              liftIO (readIORef countRef)
+            pure $ Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders)
 
   case mDeets of
     Nothing -> pure Nothing
@@ -382,47 +362,47 @@ browseMeal chefPermalink deadline mealPermalink = do
             case mMeal of
               Nothing -> pure Nothing
               Just (Entity mealId (StoredMeal title permalink _ _ desc inst images price)) -> do
-                (tags :: [MealTag]) <- do
-                  xs <- selectList [MealTagRelationMealTagMeal ==. mealId] []
-                  fmap catMaybes $ forM xs $ \(Entity _ (MealTagRelation _ tagId)) ->
-                    liftIO (getMealTagById systemEnvDatabase tagId)
-                orders <- count
-                  [ StoredOrderStoredOrderMeal ==. mealId
-                  , StoredOrderStoredOrderProgress !=. DeliveredProgress
-                  ]
-                reviewIds <-
-                  fmap (fmap (\(Entity reviewId _) -> reviewId)) $
-                    selectList [StoredReviewStoredReviewMeal ==. mealId] []
-                mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
-                case mRating of
+                mIngDiets <- liftIO (getMealIngredientsDiets systemEnvDatabase mealId)
+                case mIngDiets of
                   Nothing -> pure Nothing
-                  Just rating ->
-                    pure $ Just (mealId,title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price)
+                  Just (ings,diets) -> do
+                    mTags <- liftIO (getMealTags systemEnvDatabase mealId)
+                    case mTags of
+                      Nothing -> pure Nothing
+                      Just tags -> do
+                        orders <- count
+                          [ StoredOrderStoredOrderMeal ==. mealId
+                          , StoredOrderStoredOrderProgress !=. DeliveredProgress
+                          ]
+                        reviewIds <-
+                          fmap (fmap (\(Entity reviewId _) -> reviewId)) $
+                            selectList [StoredReviewStoredReviewMeal ==. mealId] []
+                        mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
+                        case mRating of
+                          Nothing -> pure Nothing
+                          Just rating ->
+                            pure $ Just (mealId,title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets)
 
   case mStoredMeal of
     Nothing -> pure Nothing
-    Just (mealId,title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price) -> do
+    Just (mealId,title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets) -> do
       reviews <- fmap catMaybes $ forM reviewIds getReview
-      mIngDiets <- getMealIngredientsDiets mealId
-      case mIngDiets of
-        Nothing -> pure Nothing
-        Just (ings,diets) -> do
-          ings' <- fmap catMaybes $ liftIO $
-            forM ings $ getIngredientByName systemEnvDatabase
-          pure $ Just Meal
-            { mealTitle = title
-            , mealPermalink = permalink
-            , mealDescription = desc
-            , mealInstructions = inst
-            , mealImages = images
-            , mealIngredients = ings'
-            , mealDiets = diets
-            , mealTags = tags
-            , mealOrders = orders
-            , mealRating = rating
-            , mealReviews = getReviewSynopsis <$> reviews
-            , mealPrice = price
-            }
+      ings' <- fmap catMaybes $ liftIO $
+        forM ings $ getIngredientByName systemEnvDatabase
+      pure $ Just Meal
+        { mealTitle = title
+        , mealPermalink = permalink
+        , mealDescription = desc
+        , mealInstructions = inst
+        , mealImages = images
+        , mealIngredients = ings'
+        , mealDiets = diets
+        , mealTags = tags
+        , mealOrders = orders
+        , mealRating = rating
+        , mealReviews = getReviewSynopsis <$> reviews
+        , mealPrice = price
+        }
 
 
 getCart :: AuthToken -> AppM [(StoredMealId, Int, UTCTime)]

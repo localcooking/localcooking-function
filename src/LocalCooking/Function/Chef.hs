@@ -6,8 +6,9 @@
 module LocalCooking.Function.Chef where
 
 import LocalCooking.Semantics.Chef
-  ( ChefSettings (..), MenuSettings (..)
+  ( ChefSettings (..), MenuSettings (..), MealSettings (..)
   )
+import LocalCooking.Function.Semantics (getChefTags, getMealTags, getMenuTags, getMealIngredientsDiets)
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), getUserId)
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -15,7 +16,7 @@ import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema.Semantics
-  ( StoredChef (..), StoredMenu (..)
+  ( StoredChef (..), StoredMenu (..), StoredMeal (..)
   , StoredChefId, StoredMenuId, StoredMealId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
   , EntityField
@@ -25,6 +26,7 @@ import LocalCooking.Database.Schema.Semantics
     , StoredMenuStoredMenuAuthor, StoredMenuStoredMenuPublished
     , StoredMenuStoredMenuDeadline, StoredMenuStoredMenuDescription
     , StoredMenuStoredMenuHeading, StoredMenuStoredMenuImages
+    , StoredMealStoredMealMenu
     , ChefTagRelationChefTagChef, ChefTagRelationChefTagChefTag
     , MenuTagRelationMenuTagMenu
     , MealTagRelationMealTagMeal
@@ -184,7 +186,7 @@ setChef authToken ChefSettings{..} = do
           pure (Just chefId)
 
 
-getMenus :: AuthToken -> AppM (Maybe ([(StoredMenuId, MenuSettings)]))
+getMenus :: AuthToken -> AppM (Maybe [(StoredMenuId, MenuSettings)])
 getMenus authToken = do
   mChef <- getChefFromAuthToken authToken
   case mChef of
@@ -254,26 +256,44 @@ setMenu authToken menuId MenuSettings{..} = do
       pure True
 
 
--- getMeals :: AuthToken -> StoredMenuId -> AppM [(StoredMealId, MealSettings)]
--- getMeals authToken menuId = do
---   SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
-
---   case systemEnvTokenContexts of
---     TokenContexts{tokenContextAuth} -> do
---       mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
---       case mUserId of
---         Nothing -> pure False
---         Just k -> do
---           isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
---           if not isAuthorized
---             then pure False
---             else do
---               ok <- flip runSqlPool systemEnvDatabase $ do
---                 mChefEnt <- getBy (UniqueChefOwner k)
---                 case mChefEnt of
+getMeals :: AuthToken -> StoredMenuId -> AppM (Maybe [(StoredMealId, MealSettings)])
+getMeals authToken menuId = do
+  mChef <- getChefFromAuthToken authToken
+  case mChef of
+    Nothing -> pure Nothing
+    Just (chefId,_) -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      xs <- liftIO $ flip runSqlPool systemEnvDatabase $
+        selectList [StoredMealStoredMealMenu ==. menuId] []
+      fmap (Just . catMaybes) $
+        forM xs $ \(Entity mealId (StoredMeal title permalink _ heading desc inst imgs price)) -> do
+          mTags <- liftIO (getMealTags systemEnvDatabase mealId)
+          case mTags of
+            Nothing -> pure Nothing
+            Just tags -> do
+              mIngDiets <- liftIO (getMealIngredientsDiets systemEnvDatabase mealId)
+              case mIngDiets of
+                Nothing -> pure Nothing
+                Just (ings,_) ->
+                  pure $ Just
+                    ( mealId
+                    , MealSettings
+                      { mealSettingsTitle = title
+                      , mealSettingsPermalink = permalink
+                      , mealSettingsHeading = heading
+                      , mealSettingsDescription = desc
+                      , mealSettingsInstructions = inst
+                      , mealSettingsImages = imgs
+                      , mealSettingsIngredients = ings
+                      , mealSettingsTags = tags
+                      , mealSettingsPrice = price
+                      }
+                    )
+          
 
 
 -- newMeal :: AuthToken -> StoredMenuId -> MealSettings -> AppM (Maybe StoredMealId)
+-- setMeal :: AuthToken -> StoredMenuId -> StoredMealId -> MealSettings -> AppM Bool
 
 
 hasChefRole :: AuthToken -> AppM Bool
