@@ -15,9 +15,9 @@ import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema.Semantics
-  ( StoredChef (..), ChefTagRelation (..), StoredMenu (..)
-  , StoredChefId, StoredMenuId
-  , MenuTagRelation (..)
+  ( StoredChef (..), StoredMenu (..)
+  , StoredChefId, StoredMenuId, StoredMealId
+  , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
   , EntityField
     ( StoredChefStoredChefName, StoredChefStoredChefPermalink
     , StoredChefStoredChefImages, StoredChefStoredChefAvatar
@@ -27,8 +27,9 @@ import LocalCooking.Database.Schema.Semantics
     , StoredMenuStoredMenuHeading, StoredMenuStoredMenuImages
     , ChefTagRelationChefTagChef, ChefTagRelationChefTagChefTag
     , MenuTagRelationMenuTagMenu
+    , MealTagRelationMealTagMeal
     )
-  , Unique (UniqueChefOwner, UniqueChefTag))
+  , Unique (UniqueChefOwner, UniqueChefTag, UniqueMealTag, UniqueMenuTag))
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
 import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId, getMealTagById)
 import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId, getChefTagById)
@@ -94,6 +95,44 @@ assignChefTags chefId chefSettingsTags = do
       deleteBy (UniqueChefTag chefId t)
     forM_ toAdd $ \t ->
       insert_ (ChefTagRelation chefId t)
+
+
+assignMenuTags :: StoredMenuId -> [MealTag] -> AppM ()
+assignMenuTags menuId menuSettingsTags = do
+  SystemEnv{systemEnvDatabase} <- ask
+
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    oldTags <- fmap (fmap (\(Entity _ (MenuTagRelation _ t)) -> t))
+              $ selectList [MenuTagRelationMenuTagMenu ==. menuId] []
+    newTags <- fmap catMaybes $ forM menuSettingsTags $ \t ->
+                liftIO (getMealTagId systemEnvDatabase t)
+
+    let toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
+        toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
+
+    forM_ toRemove $ \t ->
+      deleteBy (UniqueMenuTag menuId t)
+    forM_ toAdd $ \t ->
+      insert_ (MenuTagRelation menuId t)
+
+
+assignMealTags :: StoredMealId -> [MealTag] -> AppM ()
+assignMealTags mealId mealSettingsTags = do
+  SystemEnv{systemEnvDatabase} <- ask
+
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    oldTags <- fmap (fmap (\(Entity _ (MealTagRelation _ t)) -> t))
+              $ selectList [MealTagRelationMealTagMeal ==. mealId] []
+    newTags <- fmap catMaybes $ forM mealSettingsTags $ \t ->
+                liftIO (getMealTagId systemEnvDatabase t)
+
+    let toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
+        toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
+
+    forM_ toRemove $ \t ->
+      deleteBy (UniqueMealTag mealId t)
+    forM_ toAdd $ \t ->
+      insert_ (MealTagRelation mealId t)
 
 
 getChef :: AuthToken -> AppM (Maybe ChefSettings)
