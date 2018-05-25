@@ -5,7 +5,9 @@
 
 module LocalCooking.Function.Chef where
 
-import LocalCooking.Semantics.Chef (ChefSettings (..))
+import LocalCooking.Semantics.Chef
+  ( ChefSettings (..), MenuSettings (..)
+  )
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
 import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -13,16 +15,20 @@ import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema.Semantics
-  ( StoredChef (..), ChefTagRelation (..), StoredChefId
+  ( StoredChef (..), ChefTagRelation (..), StoredMenu (..)
+  , StoredChefId, StoredMenuId
+  , MenuTagRelation (..)
   , EntityField
     ( StoredChefStoredChefName, StoredChefStoredChefPermalink
     , StoredChefStoredChefImages, StoredChefStoredChefAvatar
     , StoredChefStoredChefBio
+    , StoredMenuStoredMenuAuthor
     , ChefTagRelationChefTagChef, ChefTagRelationChefTagChefTag
+    , MenuTagRelationMenuTagMenu
     )
   , Unique (UniqueChefOwner))
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
-import LocalCooking.Database.Query.Tag.Meal (insertMealTag)
+import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagById)
 import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId, getChefTagById)
 
 import qualified Data.Set as Set
@@ -159,8 +165,42 @@ setChef authToken ChefSettings{..} = do
                   pure (Just chefId)
 
 
--- getMenus :: AuthToken -> AppM [(StoredMenuId, MenuSettings)]
--- getMenus authToken =
+getMenus :: AuthToken -> AppM (Maybe ([(StoredMenuId, MenuSettings)]))
+getMenus authToken = do
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+
+  case systemEnvTokenContexts of
+    TokenContexts{tokenContextAuth} -> do
+      mUserId <- liftIO (lookupAccess tokenContextAuth authToken)
+      case mUserId of
+        Nothing -> pure Nothing
+        Just k -> do
+          isAuthorized <- liftIO (hasRole systemEnvDatabase k Chef)
+          if not isAuthorized
+            then pure Nothing
+            else flip runSqlPool systemEnvDatabase $ do
+              mChefEnt <- getBy (UniqueChefOwner k)
+              case mChefEnt of
+                Nothing -> pure Nothing
+                Just (Entity chefId _) -> do
+                  xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
+                  fmap Just
+                    $ forM xs $ \(Entity menuId (StoredMenu pub dead head desc imgs _)) -> do
+                        tags <- do
+                          xs <- selectList [MenuTagRelationMenuTagMenu ==. menuId] []
+                          fmap catMaybes $ forM xs $ \(Entity _ (MenuTagRelation _ tagId)) ->
+                            liftIO (getMealTagById systemEnvDatabase tagId)
+                        pure
+                          ( menuId
+                          , MenuSettings
+                            { menuSettingsPublished = pub
+                            , menuSettingsDeadline = dead
+                            , menuSettingsHeading = head
+                            , menuSettingsDescription = desc
+                            , menuSettingsImages = imgs
+                            , menuSettingsTags = tags
+                            }
+                          )
 
 
 -- setMenu :: AuthToken -> MenuSettings -> AppM (Maybe StoredMenuId)
