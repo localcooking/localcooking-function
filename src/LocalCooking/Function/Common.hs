@@ -123,6 +123,7 @@ register Register{..} = do
         putStrLn $ "Sent email confirmation:"
         putStrLn $ show req
         putStrLn $ show resp
+      -- FIXME TODO note - the redirect URI is defined in the spark post template
       pure True
 
 
