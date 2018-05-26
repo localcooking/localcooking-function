@@ -276,3 +276,6 @@ setUser authToken User{..} = do
                 rolesLeft <- liftIO (readIORef rolesRef)
                 forM_ rolesLeft $ \role -> insert_ (UserRoleStored role userId)
                 pure True
+
+
+-- TODO FIXME individual field validation
