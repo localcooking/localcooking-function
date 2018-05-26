@@ -7,7 +7,7 @@ module LocalCooking.Function.Common where
 
 import LocalCooking.Semantics.Common (User (..), Login (..), SocialLoginForm (..), Register (..))
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..))
-import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess)
+import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
 import LocalCooking.Database.Schema.User
@@ -25,6 +25,7 @@ import Data.Time (getCurrentTime)
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
+import Control.Concurrent.STM (atomically)
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, update, get)
@@ -58,6 +59,7 @@ confirmEmail token = do
             case mUser of
               Nothing -> pure False
               Just _ -> do
+                liftIO $ atomically $ revokeAccess tokenContextEmail token
                 update userId [StoredUserConfirmed =. True]
                 pure True
 
