@@ -1,13 +1,15 @@
 {-# LANGUAGE
     NamedFieldPuns
   , RecordWildCards
+  , OverloadedStrings
   #-}
 
 module LocalCooking.Function.Common where
 
 import LocalCooking.Semantics.Common
   (User (..), Login (..), SocialLoginForm (..), Register (..), SocialLogin (..))
-import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..))
+import LocalCooking.Function.System
+  (AppM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..))
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
@@ -27,10 +29,18 @@ import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField 
 import LocalCooking.Common.AccessToken.Email (EmailToken)
 import SparkPost.Keys (SparkPostCredentials (..), confirmEmailRequest)
 import Facebook.Return (FacebookLoginReturnError, handleFacebookLoginReturn)
+import Google.Keys
+  ( GoogleCredentials (..), ReCaptchaSecret (getReCaptchaSecret)
+  , ReCaptchaResponse (getReCaptchaResponse), ReCaptchaVerifyResponse (..)
+  , googleReCaptchaVerifyURI)
 
+import Data.URI (printURI)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set
 import Data.Time (getCurrentTime)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Data.Aeson as Aeson
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Reader (ask)
@@ -38,7 +48,7 @@ import Control.Concurrent.STM (atomically)
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, update, get)
-import Network.HTTP.Client (httpLbs)
+import Network.HTTP.Client (httpLbs, method, responseBody, urlEncodedBody, parseRequest)
 
 
 
@@ -140,37 +150,61 @@ register Register{..} = do
     { systemEnvDatabase
     , systemEnvKeys = Keys
       { keysSparkPost = SparkPostCredentials{sparkPostKey}
+      , keysGoogle = GoogleCredentials
+        { googleReCaptchaSecret
+        }
       }
     , systemEnvManagers = Managers
       { managersSparkPost
+      , managersReCaptcha
       }
     } <- ask
 
-  mUserId <- liftIO $ flip runSqlPool systemEnvDatabase $ do
-    mEnt <- getBy (UniqueEmail registerEmail)
-    case mEnt of
-      Just _ -> pure Nothing
-      Nothing -> do
-        now <- liftIO getCurrentTime
-        userId <- insert (StoredUser now registerEmail registerPassword False)
-        case registerSocial of
-          SocialLoginForm mFb -> do
-            case mFb of
-              Nothing -> pure ()
-              Just userFb -> insert_ (FacebookUserDetails userFb userId)
-        pure (Just userId)
-  case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      emailToken <- newEmailToken userId
-      req <- liftIO (confirmEmailRequest sparkPostKey registerEmail emailToken)
-      resp <- liftIO (httpLbs req managersSparkPost)
-      liftIO $ do
-        putStrLn $ "Sent email confirmation:"
-        putStrLn $ show req
-        putStrLn $ show resp
-      -- FIXME TODO note - the redirect URI is defined in the spark post template
-      pure True
+  resp <- liftIO $ do
+    req <- parseRequest $ T.unpack $ printURI googleReCaptchaVerifyURI
+    let req' = urlEncodedBody
+          [ ("secret", T.encodeUtf8 $ getReCaptchaSecret googleReCaptchaSecret)
+          , ("response", T.encodeUtf8 $ getReCaptchaResponse registerReCaptcha)
+          ] ( req
+              { method = "POST"
+              }
+            )
+    httpLbs req' managersReCaptcha
+
+  case Aeson.decode (responseBody resp) of
+    Nothing -> do
+      liftIO $ putStrLn $ "Couldn't parse response body: " ++ show (responseBody resp)
+      pure False
+    Just (ReCaptchaVerifyResponse success)
+      | not success -> do
+        liftIO $ putStrLn $ "recaptcha failure: " ++ show (responseBody resp)
+        pure False
+      | otherwise -> do
+        mUserId <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+          mEnt <- getBy (UniqueEmail registerEmail)
+          case mEnt of
+            Just _ -> pure Nothing
+            Nothing -> do
+              now <- liftIO getCurrentTime
+              userId <- insert (StoredUser now registerEmail registerPassword False)
+              case registerSocial of
+                SocialLoginForm mFb -> do
+                  case mFb of
+                    Nothing -> pure ()
+                    Just userFb -> insert_ (FacebookUserDetails userFb userId)
+              pure (Just userId)
+        case mUserId of
+          Nothing -> pure False
+          Just userId -> do
+            emailToken <- newEmailToken userId
+            req <- liftIO (confirmEmailRequest sparkPostKey registerEmail emailToken)
+            resp <- liftIO (httpLbs req managersSparkPost)
+            liftIO $ do
+              putStrLn $ "Sent email confirmation:"
+              putStrLn $ show req
+              putStrLn $ show resp
+            -- FIXME TODO note - the redirect URI is defined in the spark post template
+            pure True
 
 
 -- | Something like "get user details"
