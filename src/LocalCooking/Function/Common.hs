@@ -6,16 +6,18 @@
 module LocalCooking.Function.Common where
 
 import LocalCooking.Semantics.Common (User (..), Login (..), SocialLoginForm (..), Register (..))
-import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..))
+import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..))
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
 import LocalCooking.Database.Schema.User
-  ( StoredUser (..)
+  ( StoredUser (..), StoredUserId
   , EntityField
     (StoredUserEmail, StoredUserPassword, StoredUserCreated, StoredUserConfirmed)
   , Unique (UniqueEmail))
 import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
+import LocalCooking.Common.AccessToken.Email (EmailToken)
+import SparkPost.Keys (SparkPostCredentials (..), confirmEmailRequest)
 
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set
@@ -26,7 +28,38 @@ import Control.Monad.Reader (ask)
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, update, get)
+import Network.HTTP.Client (httpLbs)
 
+
+
+newEmailToken :: StoredUserId -> AppM EmailToken
+newEmailToken userId = do
+  SystemEnv{systemEnvTokenContexts} <- ask
+
+  case systemEnvTokenContexts of
+    TokenContexts{tokenContextEmail} -> do
+      token <- liftIO (insertAccess tokenContextEmail userId)
+      pure token
+
+
+confirmEmail :: EmailToken -> AppM Bool
+confirmEmail token = do
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+
+  case systemEnvTokenContexts of
+    TokenContexts{tokenContextEmail} -> do
+      mUserId <- liftIO (lookupAccess tokenContextEmail token)
+      case mUserId of
+        Nothing -> pure False
+        Just userId -> do
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            -- FIXME lightweight existence checker?
+            mUser <- get userId
+            case mUser of
+              Nothing -> pure False
+              Just _ -> do
+                update userId [StoredUserConfirmed =. True]
+                pure True
 
 
 login :: Login -> AppM (Maybe AuthToken)
@@ -57,22 +90,40 @@ login Login{..} = do
 
 register :: Register -> AppM Bool
 register Register{..} = do
-  SystemEnv{systemEnvDatabase} <- ask
+  SystemEnv
+    { systemEnvDatabase
+    , systemEnvKeys = Keys
+      { keysSparkPost = SparkPostCredentials{sparkPostKey}
+      }
+    , systemEnvManagers = Managers
+      { managersSparkPost
+      }
+    } <- ask
 
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  mUserId <- liftIO $ flip runSqlPool systemEnvDatabase $ do
     mEnt <- getBy (UniqueEmail registerEmail)
     case mEnt of
-      Just _ -> pure False
+      Just _ -> pure Nothing
       Nothing -> do
         now <- liftIO getCurrentTime
-        k <- insert (StoredUser now registerEmail registerPassword False)
+        userId <- insert (StoredUser now registerEmail registerPassword False)
         case registerSocial of
           SocialLoginForm mFb -> do
             case mFb of
               Nothing -> pure ()
-              Just userFb -> insert_ (FacebookUserDetails userFb k)
-        -- TODO FIXME issue an Email token, send email
-        pure True
+              Just userFb -> insert_ (FacebookUserDetails userFb userId)
+        pure (Just userId)
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      emailToken <- newEmailToken userId
+      req <- liftIO (confirmEmailRequest sparkPostKey registerEmail emailToken)
+      resp <- liftIO (httpLbs req managersSparkPost)
+      liftIO $ do
+        putStrLn $ "Sent email confirmation:"
+        putStrLn $ show req
+        putStrLn $ show resp
+      pure True
 
 
 -- | Something like "get user details"

@@ -88,7 +88,7 @@ data SystemEnv = SystemEnv
   , systemEnvManagers      :: Managers
   , systemEnvSalt          :: HashedPassword
   , systemEnvTokenContexts :: TokenContexts
-  , systemEnvPendingEmail  :: TVar (HashMap EmailToken StoredUserId)
+  -- , systemEnvPendingEmail  :: TVar (HashMap EmailToken StoredUserId)
   , systemEnvReviews       :: ReviewAccumulator
   }
 
@@ -114,7 +114,7 @@ newSystemEnv NewSystemEnvArgs{..} = do
   systemEnvManagers <- defManagers
   systemEnvTokenContexts <- atomically defTokenContexts
   systemEnvSalt <- getPasswordSalt systemEnvDatabase
-  systemEnvPendingEmail <- newTVarIO HashMap.empty
+  -- systemEnvPendingEmail <- newTVarIO HashMap.empty
   systemEnvReviews <- newReviewAccumulator
 
   pure SystemEnv
@@ -123,7 +123,7 @@ newSystemEnv NewSystemEnvArgs{..} = do
     , systemEnvManagers
     , systemEnvSalt
     , systemEnvTokenContexts
-    , systemEnvPendingEmail
+    -- , systemEnvPendingEmail
     , systemEnvReviews
     }
 
