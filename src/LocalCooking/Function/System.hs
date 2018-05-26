@@ -26,7 +26,7 @@ import LocalCooking.Common.User.Role (UserRole)
 import LocalCooking.Database.Schema.User (StoredUserId)
 import LocalCooking.Database.Query.Salt (getPasswordSalt)
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
-import Facebook.App (FacebookAppCredentials)
+import Facebook.Types (FacebookAppCredentials)
 import Google.Keys (GoogleCredentials)
 import SparkPost.Keys (SparkPostCredentials)
 
@@ -41,6 +41,7 @@ import Data.Text (Text)
 import Data.Time.Clock (secondsToDiffTime)
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.UTF8 as BS8
+import Data.URI (URI)
 import Control.Monad.Logger (runStderrLoggingT)
 import Control.Monad.Reader (ReaderT (runReaderT), ask)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -88,18 +89,19 @@ data SystemEnv = SystemEnv
   , systemEnvManagers      :: Managers
   , systemEnvSalt          :: HashedPassword
   , systemEnvTokenContexts :: TokenContexts
-  -- , systemEnvPendingEmail  :: TVar (HashMap EmailToken StoredUserId)
   , systemEnvReviews       :: ReviewAccumulator
+  , systemEnvFBRedirect    :: URI
   }
 
 
 data NewSystemEnvArgs = NewSystemEnvArgs
-  { dbHost :: Text
-  , dbPort :: Int
-  , dbUser :: Text
-  , dbPassword :: Text
-  , dbName :: Text
-  , keys :: Keys
+  { dbHost           :: Text
+  , dbPort           :: Int
+  , dbUser           :: Text
+  , dbPassword       :: Text
+  , dbName           :: Text
+  , keys             :: Keys
+  , facebookRedirect :: URI
   }
 
 
@@ -114,7 +116,6 @@ newSystemEnv NewSystemEnvArgs{..} = do
   systemEnvManagers <- defManagers
   systemEnvTokenContexts <- atomically defTokenContexts
   systemEnvSalt <- getPasswordSalt systemEnvDatabase
-  -- systemEnvPendingEmail <- newTVarIO HashMap.empty
   systemEnvReviews <- newReviewAccumulator
 
   pure SystemEnv
@@ -123,8 +124,8 @@ newSystemEnv NewSystemEnvArgs{..} = do
     , systemEnvManagers
     , systemEnvSalt
     , systemEnvTokenContexts
-    -- , systemEnvPendingEmail
     , systemEnvReviews
+    , systemEnvFBRedirect = facebookRedirect
     }
 
 

@@ -5,7 +5,8 @@
 
 module LocalCooking.Function.Common where
 
-import LocalCooking.Semantics.Common (User (..), Login (..), SocialLoginForm (..), Register (..))
+import LocalCooking.Semantics.Common
+  (User (..), Login (..), SocialLoginForm (..), Register (..), SocialLogin (..))
 import LocalCooking.Function.System (AppM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..))
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -15,9 +16,17 @@ import LocalCooking.Database.Schema.User
   , EntityField
     (StoredUserEmail, StoredUserPassword, StoredUserCreated, StoredUserConfirmed)
   , Unique (UniqueEmail))
+import LocalCooking.Database.Schema.Facebook.AccessToken
+  ( FacebookUserAccessTokenStored (..)
+  )
+import LocalCooking.Database.Schema.Facebook.UserDetails
+  ( FacebookUserDetails (..)
+  , Unique (UniqueFacebookUserId)
+  )
 import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
 import LocalCooking.Common.AccessToken.Email (EmailToken)
 import SparkPost.Keys (SparkPostCredentials (..), confirmEmailRequest)
+import Facebook.Return (FacebookLoginReturnError, handleFacebookLoginReturn)
 
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set
@@ -84,10 +93,45 @@ login Login{..} = do
           pure (Just token)
 
 
--- socialLogin :: SocialLogin -> AppM (Maybe AuthToken)
--- socialLogin socialLogin = case socialLogin of
---   SocialLoginFB{..} -> do
-    -- FIXME needs a HTTP reach-around for FB login ><
+-- | If there's no error, the associated userId with the facebookUserId doesn't exist.
+socialLogin :: SocialLogin
+            -> AppM (Either (Maybe FacebookLoginReturnError) AuthToken)
+socialLogin socialLogin = case socialLogin of
+  SocialLoginFB{..} -> do
+    SystemEnv
+      { systemEnvManagers = Managers
+        { managersFacebook
+        }
+      , systemEnvKeys = Keys
+        { keysFacebook
+        }
+      , systemEnvFBRedirect
+      , systemEnvDatabase
+      , systemEnvTokenContexts = TokenContexts
+        { tokenContextAuth
+        }
+      } <- ask
+    --  FIXME needs a HTTP reach-around for FB login ><
+    eLoginErr <- liftIO $ handleFacebookLoginReturn
+      managersFacebook
+      keysFacebook
+      systemEnvFBRedirect
+      socialLoginFBCode
+    case eLoginErr of
+      Left e -> pure $ Left $ Just e
+      Right (fbToken,fbUserId) -> do
+        mUserId <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+          mFbUser <- getBy (UniqueFacebookUserId fbUserId)
+          case mFbUser of
+            Nothing -> pure Nothing
+            Just (Entity fbDetailsId (FacebookUserDetails _ userId)) -> do
+              insert_ (FacebookUserAccessTokenStored fbToken fbDetailsId)
+              pure (Just userId)
+        case mUserId of
+          Nothing -> pure (Left Nothing)
+          Just userId -> do
+            token <- liftIO (insertAccess tokenContextAuth userId)
+            pure (Right token)
 
 
 register :: Register -> AppM Bool
