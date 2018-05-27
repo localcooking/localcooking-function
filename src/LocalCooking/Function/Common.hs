@@ -222,7 +222,7 @@ getUser authToken = do
             mStoredUser <- get k
             case mStoredUser of
               Nothing -> pure Nothing
-              Just (StoredUser created email password conf) -> do
+              Just (StoredUser created email _ conf) -> do
                 roles <- fmap (fmap (\(Entity _ (UserRoleStored r _)) -> r))
                       $ selectList [UserRoleStoredUserRoleOwner ==. k] []
                 mFb <- getBy (FacebookUserDetailsOwner k)
@@ -230,7 +230,6 @@ getUser authToken = do
                   { userId = k
                   , userCreated = created
                   , userEmail = email
-                  , userPassword = password
                   , userSocial = SocialLoginForm
                     { socialLoginFormFb = case mFb of
                       Nothing -> Nothing
@@ -241,6 +240,7 @@ getUser authToken = do
                   }
 
 
+-- FIXME TODO changePassword?
 -- | "set user details"
 setUser :: AuthToken -> User -> AppM Bool
 setUser authToken User{..} = do
@@ -258,7 +258,6 @@ setUser authToken User{..} = do
                 update userId
                   [ StoredUserCreated =. userCreated
                   , StoredUserEmail =. userEmail
-                  , StoredUserPassword =. userPassword
                   , StoredUserConfirmed =. userEmailConfirmed
                   ]
                 case userSocial of

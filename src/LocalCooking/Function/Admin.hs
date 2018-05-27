@@ -42,7 +42,7 @@ getUsers authToken = do
 
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         xs <- selectList [] []
-        fmap Just $ forM xs $ \(Entity k (StoredUser created email password conf)) -> do
+        fmap Just $ forM xs $ \(Entity k (StoredUser created email _ conf)) -> do
           roles <- fmap (fmap (\(Entity _ (UserRoleStored r _)) -> r))
                 $ selectList [UserRoleStoredUserRoleOwner ==. k] []
           mFb <- getBy (FacebookUserDetailsOwner k)
@@ -50,7 +50,6 @@ getUsers authToken = do
             { userId = k
             , userCreated = created
             , userEmail = email
-            , userPassword = password
             , userSocial = SocialLoginForm
               { socialLoginFormFb = case mFb of
                 Nothing -> Nothing
@@ -74,7 +73,6 @@ setUser authToken User{..} = do
         update userId
           [ StoredUserCreated =. userCreated
           , StoredUserEmail =. userEmail
-          , StoredUserPassword =. userPassword
           , StoredUserConfirmed =. userEmailConfirmed
           ]
         case userSocial of
