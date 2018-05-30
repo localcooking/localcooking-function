@@ -5,7 +5,6 @@
 
 module LocalCooking.Function.Admin where
 
-import LocalCooking.Semantics.Admin (GetUsers (..), SetUser (..), AddUser (..))
 import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..), Register (..))
 import LocalCooking.Function.System (AppM, SystemEnv (..), getUserId, guardRole)
 import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
