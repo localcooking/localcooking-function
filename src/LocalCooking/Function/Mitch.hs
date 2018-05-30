@@ -117,6 +117,8 @@ getCustomer authToken = do
                       allergies
 
 
+-- submitReview :: ?
+
 
 getReview :: StoredReviewId -> AppM (Maybe Review)
 getReview reviewId = do
@@ -212,37 +214,46 @@ getChefSynopsis chefId = do
             }
 
 
-getChefMenuSynopses :: StoredChefId -> AppM [MenuSynopsis]
+getChefMenuSynopses :: StoredChefId -> AppM (Maybe [MenuSynopsis])
 getChefMenuSynopses chefId = do
   SystemEnv{systemEnvDatabase} <- ask
 
   flip runSqlPool systemEnvDatabase $ do
-    xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
-    fmap catMaybes $ forM xs $ \(Entity menuId (StoredMenu published deadline heading _ images _)) ->
-      case published of
-        Nothing -> pure Nothing
-        Just p -> do
-          mTags <- liftIO (getMenuTags systemEnvDatabase menuId)
-          case mTags of
+    mChef <- get chefId
+    case mChef of
+      Nothing -> pure Nothing
+      Just _ -> do
+        xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
+        fmap (Just . catMaybes) $ forM xs $ \(Entity menuId (StoredMenu published deadline heading _ images _)) ->
+          case published of
             Nothing -> pure Nothing
-            Just tags ->
-              pure $ Just MenuSynopsis
-                { menuSynopsisPublished = p
-                , menuSynopsisDeadline = deadline
-                , menuSynopsisHeading = heading
-                , menuSynopsisTags = tags
-                , menuSynopsisImages = images
-                }
+            Just p -> do
+              mTags <- liftIO (getMenuTags systemEnvDatabase menuId)
+              case mTags of
+                Nothing -> pure Nothing
+                Just tags ->
+                  pure $ Just MenuSynopsis
+                    { menuSynopsisPublished = p
+                    , menuSynopsisDeadline = deadline
+                    , menuSynopsisHeading = heading
+                    , menuSynopsisTags = tags
+                    , menuSynopsisImages = images
+                    }
 
 
-getMenuMealSynopses :: StoredMenuId -> AppM [MealSynopsis]
+getMenuMealSynopses :: StoredMenuId -> AppM (Maybe [MealSynopsis])
 getMenuMealSynopses menuId = do
   SystemEnv{systemEnvDatabase} <- ask
 
-  xs <- flip runSqlPool systemEnvDatabase $
-    selectList [StoredMealStoredMealMenu ==. menuId] []
-  fmap catMaybes $ forM xs $ \(Entity mealId _) ->
-    getMealSynopsis mealId
+  mXs <- flip runSqlPool systemEnvDatabase $ do
+    mMenu <- get menuId
+    case mMenu of
+      Nothing -> pure Nothing
+      Just _ -> Just <$> selectList [StoredMealStoredMealMenu ==. menuId] []
+  case mXs of
+    Nothing -> pure Nothing
+    Just xs -> fmap (Just . catMaybes) $ forM xs $ \(Entity mealId _) ->
+                  getMealSynopsis mealId
 
 
 browseChef :: Permalink -> AppM (Maybe Chef)
@@ -271,23 +282,26 @@ browseChef chefPermalink = do
   case mDeets of
     Nothing -> pure Nothing
     Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders) -> do
-      meals <- getChefMenuSynopses chefId
-      mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
-      case mReviews of
+      mMeals <- getChefMenuSynopses chefId
+      case mMeals of
         Nothing -> pure Nothing
-        Just (rating,reviews) ->
-          pure $ Just Chef
-            { chefName = name
-            , chefPermalink = permalink
-            , chefImages = images
-            , chefBio = bio
-            , chefRating = rating
-            , chefReviews = getReviewSynopsis <$> reviews
-            , chefActiveOrders = activeOrders
-            , chefTotalOrders = totalOrders
-            , chefTags = tags
-            , chefMenus = meals
-            }
+        Just meals -> do
+          mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
+          case mReviews of
+            Nothing -> pure Nothing
+            Just (rating,reviews) ->
+              pure $ Just Chef
+                { chefName = name
+                , chefPermalink = permalink
+                , chefImages = images
+                , chefBio = bio
+                , chefRating = rating
+                , chefReviews = getReviewSynopsis <$> reviews
+                , chefActiveOrders = activeOrders
+                , chefTotalOrders = totalOrders
+                , chefTags = tags
+                , chefMenus = meals
+                }
 
 
 browseMenu :: Permalink -> Day -> AppM (Maybe Menu)
@@ -314,14 +328,17 @@ browseMenu chefPermalink deadline = do
       case mChef of
         Nothing -> pure Nothing
         Just chef -> do
-          meals <- getMenuMealSynopses menuId
-          pure $ Just Menu
-            { menuPublished = published
-            , menuDeadline = deadline
-            , menuDescription = desc
-            , menuAuthor = chef
-            , menuMeals = meals
-            }
+          mMeals <- getMenuMealSynopses menuId
+          case mMeals of
+            Nothing -> pure Nothing
+            Just meals ->
+              pure $ Just Menu
+                { menuPublished = published
+                , menuDeadline = deadline
+                , menuDescription = desc
+                , menuAuthor = chef
+                , menuMeals = meals
+                }
 
 browseMeal :: Permalink -> Day -> Permalink -> AppM (Maybe Meal)
 browseMeal chefPermalink deadline mealPermalink = do
