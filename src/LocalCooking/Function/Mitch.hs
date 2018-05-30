@@ -16,7 +16,8 @@ import LocalCooking.Semantics.Mitch
   , getReviewSynopsis
   )
 import LocalCooking.Function.Semantics
-  (getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags, assignAllergies, assignDiets)
+  ( getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags
+  , assignAllergies, assignDiets, getCustDiets, getCustAllergies)
 import LocalCooking.Function.System (AppM, SystemEnv (..), getUserId)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -87,6 +88,34 @@ setCustomer authToken Customer{..} = do
           assignDiets systemEnvDatabase custId customerDiets
           assignAllergies systemEnvDatabase custId customerAllergies
           pure True
+
+
+getCustomer :: AuthToken -> AppM (Maybe Customer)
+getCustomer authToken = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- ask
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mCustEnt <- getBy (UniqueCustomer userId)
+        case mCustEnt of
+          Nothing -> pure Nothing
+          Just (Entity custId (StoredCustomer _ name address)) -> do
+            mDiets <- liftIO $ getCustDiets systemEnvDatabase custId
+            case mDiets of
+              Nothing -> pure Nothing
+              Just diets -> do
+                mAllergies <- liftIO $ getCustAllergies systemEnvDatabase custId
+                case mAllergies of
+                  Nothing -> pure Nothing
+                  Just allergies ->
+                    pure $ Just $ Customer
+                      name
+                      address
+                      diets
+                      allergies
+
 
 
 getReview :: StoredReviewId -> AppM (Maybe Review)

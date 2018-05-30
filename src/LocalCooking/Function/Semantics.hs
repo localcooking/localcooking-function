@@ -10,7 +10,7 @@ import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.Ingredient (IngredientName)
 import LocalCooking.Common.Diet (Diet)
 import LocalCooking.Database.Query.IngredientDiet
-  ( getDietId, getDiets
+  ( getDietId, getDiets, getDietById
   , getStoredIngredientId, getIngredientViolations
   , getIngredientNameById)
 import LocalCooking.Database.Query.Tag.Chef (getChefTagById, getChefTagId)
@@ -194,6 +194,18 @@ assignDiets systemEnvDatabase custId customerDiets =
       insert_ (StoredDietPreference custId d)
 
 
+getCustDiets :: ConnectionPool -> StoredCustomerId -> IO (Maybe [Diet])
+getCustDiets systemEnvDatabase custId =
+  flip runSqlPool systemEnvDatabase $ do
+    mCust <- get custId
+    case mCust of
+      Nothing -> pure Nothing
+      Just _ -> do
+        ds <- fmap (fmap (\(Entity _ (StoredDietPreference _ d)) -> d))
+            $ selectList [StoredDietPreferenceDietPreferenceOwner ==. custId] []
+        fmap (Just . catMaybes) $ forM ds $ liftIO . getDietById systemEnvDatabase
+
+
 
 assignAllergies :: ConnectionPool -> StoredCustomerId -> [IngredientName] -> IO ()
 assignAllergies systemEnvDatabase custId customerAllergies =
@@ -209,3 +221,15 @@ assignAllergies systemEnvDatabase custId customerAllergies =
       , StoredAllergyAllergy ==. i
       ]
     forM_ toAdd $ \i -> insert_ (StoredAllergy custId i)
+
+
+getCustAllergies :: ConnectionPool -> StoredCustomerId -> IO (Maybe [IngredientName])
+getCustAllergies systemEnvDatabase custId =
+  flip runSqlPool systemEnvDatabase $ do
+    mCust <- get custId
+    case mCust of
+      Nothing -> pure Nothing
+      Just _ -> do
+        ds <- fmap (fmap (\(Entity _ (StoredAllergy _ a)) -> a))
+            $ selectList [StoredAllergyAllergyOwner ==. custId] []
+        fmap (Just . catMaybes) $ forM ds $ liftIO . getIngredientNameById systemEnvDatabase
