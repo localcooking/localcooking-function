@@ -41,11 +41,11 @@ calculateThread db ReviewAccumulator{..} = forever $ do
     forM_ chefs $ \(Entity chefId _) -> do
       reviews <- selectList [StoredReviewStoredReviewChef ==. chefId] []
       let totalRating =
-            let go (Entity _ (StoredReview _ _ _ rating _ _ _ _ _)) acc =
+            let go (Entity _ (StoredReview _ _ _ _ rating _ _ _ _ )) acc =
                   (acc + ratingToRational rating) / 2
             in  ratingFromRational (foldr go 5 reviews)
           rs =
-            let go (Entity i (StoredReview _ _ _ rating sub heading body images _)) = Review
+            let go (Entity i (StoredReview _ _ _ _ rating sub heading body images)) = Review
                   { reviewRating = rating
                   , reviewSubmitted = sub
                   , reviewHeading = heading
@@ -61,7 +61,7 @@ calculateThread db ReviewAccumulator{..} = forever $ do
     forM_ meals $ \(Entity mealId _) -> do
       reviews <- selectList [StoredReviewStoredReviewMeal ==. mealId] []
       let totalRating =
-            let go (Entity _ (StoredReview _ _ _ rating _ _ _ _ _)) acc =
+            let go (Entity _ (StoredReview _ _ _ _ rating _ _ _ _)) acc =
                   (acc + ratingToRational rating) / 2
             in  ratingFromRational (foldr go 5 reviews)
 

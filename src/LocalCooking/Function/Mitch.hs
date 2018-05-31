@@ -18,10 +18,12 @@ import LocalCooking.Semantics.Mitch
 import LocalCooking.Function.Semantics
   ( getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags
   , assignAllergies, assignDiets, getCustDiets, getCustAllergies)
-import LocalCooking.Function.System (AppM, SystemEnv (..), getUserId)
+import LocalCooking.Function.System (AppM, SystemEnv (..), getUserId, guardRole)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
+import LocalCooking.Common.Rating (Rating)
+import qualified LocalCooking.Common.User.Role as UserRole
 import LocalCooking.Database.Query.IngredientDiet (getIngredientByName)
 import LocalCooking.Database.Query.Semantics (getMealId)
 import LocalCooking.Database.Schema.User.Customer
@@ -33,7 +35,7 @@ import LocalCooking.Database.Schema.User.Customer
   , Unique (UniqueCustomer))
 import LocalCooking.Database.Schema.Semantics
   ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
-  , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId
+  , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId, StoredOrderId
   , CartRelation (..)
   , EntityField
     ( StoredMenuStoredMenuAuthor
@@ -49,8 +51,11 @@ import LocalCooking.Database.Schema.Semantics
   )
 
 import Data.Maybe (catMaybes)
+import Data.Text (Text)
 import Data.Text.Permalink (Permalink)
+import Data.Text.Markdown (MarkdownText)
 import Data.IORef (newIORef, readIORef, modifyIORef)
+import Data.Image.Source (ImageSource)
 import Data.Time (UTCTime, getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
 import Control.Monad (forM, forM_)
@@ -117,7 +122,42 @@ getCustomer authToken = do
                       allergies
 
 
--- submitReview :: ?
+submitReview :: AuthToken -> StoredOrderId -> Rating -> Text
+             -> MarkdownText -> [ImageSource] -> AppM (Maybe StoredReviewId)
+submitReview authToken orderId rating heading body images = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      ok <- guardRole userId UserRole.Customer
+      if not ok
+        then pure Nothing
+        else do
+          SystemEnv{systemEnvDatabase} <- ask
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            mCust <- getBy (UniqueCustomer userId)
+            case mCust of
+              Nothing -> pure Nothing
+              Just (Entity custId _) -> do
+                mOrder <- get orderId
+                case mOrder of
+                  Nothing -> pure Nothing
+                  Just (StoredOrder custId' mealId menuId chefId _ _ _)
+                    | custId /= custId' -> pure Nothing
+                    | otherwise -> do
+                        now <- liftIO getCurrentTime
+                        reviewId <- insert $ StoredReview
+                          orderId
+                          chefId
+                          mealId
+                          custId
+                          rating
+                          now
+                          heading
+                          body
+                          images
+                        pure (Just reviewId)
+
 
 
 getReview :: StoredReviewId -> AppM (Maybe Review)
@@ -128,7 +168,7 @@ getReview reviewId = do
     mReview <- get reviewId
     case mReview of
       Nothing -> pure Nothing
-      Just (StoredReview _ _ _ rating submitted heading body images _) ->
+      Just (StoredReview _ _ _ _ rating submitted heading body images) ->
         pure $ Just Review
           { reviewRating = rating
           , reviewSubmitted = submitted
@@ -400,15 +440,15 @@ browseMeal chefPermalink deadline mealPermalink = do
         }
 
 
-getCart :: AuthToken -> AppM [(StoredMealId, Int, UTCTime)]
+getCart :: AuthToken -> AppM (Maybe [(StoredMealId, Int, UTCTime)])
 getCart authToken = do
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure []
+    Nothing -> pure Nothing
     Just userId -> do
       SystemEnv{systemEnvDatabase} <- ask
       liftIO $ flip runSqlPool systemEnvDatabase $
-        fmap (fmap (\(Entity _ (CartRelation _ mealId vol time)) -> (mealId,vol,time)))
+        fmap (Just . fmap (\(Entity _ (CartRelation _ mealId vol time)) -> (mealId,vol,time)))
           $ selectList [CartRelationCartRelationCustomer ==. userId] []
 
 
@@ -446,17 +486,23 @@ getOrders authToken = do
     Nothing -> pure Nothing
     Just userId -> do
       SystemEnv{systemEnvDatabase} <- ask
-      xs <- flip runSqlPool systemEnvDatabase $
-        selectList [StoredOrderStoredOrderCustomer ==. userId] []
-      fmap (Just . catMaybes) $
-        forM xs $ \(Entity _ (StoredOrder _ mealId _ _ vol progress time)) -> do
-          mMealSynopsis <- getMealSynopsis mealId
-          case mMealSynopsis of
-            Nothing -> pure Nothing
-            Just meal ->
-              pure $ Just Order
-                { orderMeal = meal
-                , orderProgress = progress
-                , orderTime = time
-                , orderVolume = vol
-                }
+      mXs <- flip runSqlPool systemEnvDatabase $ do
+        mCust <- getBy (UniqueCustomer userId)
+        case mCust of
+          Nothing -> pure Nothing
+          Just (Entity custId _) ->
+            Just <$> selectList [StoredOrderStoredOrderCustomer ==. custId] []
+      case mXs of
+        Nothing -> pure Nothing
+        Just xs -> fmap (Just . catMaybes) $
+          forM xs $ \(Entity _ (StoredOrder _ mealId _ _ vol progress time)) -> do
+            mMealSynopsis <- getMealSynopsis mealId
+            case mMealSynopsis of
+              Nothing -> pure Nothing
+              Just meal ->
+                pure $ Just Order
+                  { orderMeal = meal
+                  , orderProgress = progress
+                  , orderTime = time
+                  , orderVolume = vol
+                  }
