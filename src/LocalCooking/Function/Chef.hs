@@ -216,8 +216,8 @@ newMenu authToken MenuSettings{..} = do
             pure (Just menuId)
 
 
-setMenu :: AuthToken -> StoredMenuId -> MenuSettings -> AppM Bool
-setMenu authToken menuId MenuSettings{..} = do
+setMenu :: AuthToken -> WithId StoredMenuId MenuSettings -> AppM Bool
+setMenu authToken (WithId menuId MenuSettings{..}) = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
     then pure False
@@ -278,8 +278,8 @@ getMeals authToken menuId = do
                     
 
 
-newMeal :: AuthToken -> StoredMenuId -> MealSettings -> AppM (Maybe StoredMealId)
-newMeal authToken menuId MealSettings{..} = do
+newMeal :: AuthToken -> WithId StoredMenuId MealSettings -> AppM (Maybe StoredMealId)
+newMeal authToken (WithId menuId MealSettings{..}) = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
     then pure Nothing
@@ -312,8 +312,8 @@ newMeal authToken menuId MealSettings{..} = do
             pure (Just mealId)
 
 
-setMeal :: AuthToken -> StoredMenuId -> StoredMealId -> MealSettings -> AppM Bool
-setMeal authToken menuId mealId MealSettings{..} = do
+setMeal :: AuthToken -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> AppM Bool
+setMeal authToken (WithId menuId (WithId mealId MealSettings{..})) = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
     then pure False
