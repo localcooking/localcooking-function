@@ -12,7 +12,7 @@ import LocalCooking.Semantics.Mitch
   , Chef (..), ChefSynopsis (..)
   , MenuSynopsis (..), Menu (..)
   , MealSynopsis (..), Meal (..)
-  , Order (..)
+  , Order (..), CartEntry (..)
   , getReviewSynopsis
   )
 import LocalCooking.Function.Semantics
@@ -440,7 +440,7 @@ browseMeal chefPermalink deadline mealPermalink = do
         }
 
 
-getCart :: AuthToken -> AppM (Maybe [(StoredMealId, Int, UTCTime)])
+getCart :: AuthToken -> AppM (Maybe [CartEntry])
 getCart authToken = do
   mUserId <- getUserId authToken
   case mUserId of
@@ -448,7 +448,7 @@ getCart authToken = do
     Just userId -> do
       SystemEnv{systemEnvDatabase} <- ask
       liftIO $ flip runSqlPool systemEnvDatabase $
-        fmap (Just . fmap (\(Entity _ (CartRelation _ mealId vol time)) -> (mealId,vol,time)))
+        fmap (Just . fmap (\(Entity _ (CartRelation _ mealId vol time)) -> CartEntry mealId vol time))
           $ selectList [CartRelationCartRelationCustomer ==. userId] []
 
 
