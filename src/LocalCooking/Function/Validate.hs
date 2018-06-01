@@ -16,6 +16,7 @@ import Data.Text.Permalink (Permalink)
 import Text.EmailAddress (EmailAddress)
 import Control.Monad.Reader (ask)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Database.Persist (Entity (..))
 import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (getBy, get)
 
@@ -74,3 +75,13 @@ passwordVerify authToken pw = do
         case mUser of
           Nothing -> pure False
           Just (StoredUser _ _ pw' _) -> pure (pw == pw')
+
+
+passwordVerifyUnauth :: EmailAddress -> HashedPassword -> AppM Bool
+passwordVerifyUnauth email pw = do
+  SystemEnv{systemEnvDatabase} <- ask
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    mUserId <- getBy (UniqueEmail email)
+    case mUserId of
+      Nothing -> pure False
+      Just (Entity _ (StoredUser _ _ pw' _)) -> pure (pw == pw')
