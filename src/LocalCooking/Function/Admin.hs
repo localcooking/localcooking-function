@@ -29,8 +29,6 @@ import Database.Persist.Class (selectList, getBy, insert, insert_, delete, delet
 
 
 
--- FIXME verify authentication
-
 getUsers :: AuthToken -> AppM (Maybe [User])
 getUsers authToken = do
   isAuthorized <- verifyAdminhood authToken
