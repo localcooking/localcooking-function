@@ -33,22 +33,19 @@ import SparkPost.Keys (SparkPostCredentials)
 import Data.Aeson (FromJSON (..), (.:), Value (Object))
 import Data.Aeson.Types (typeMismatch)
 import Data.Default (Default (..))
-import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
 import Data.Pool (destroyAllResources)
 import Data.Monoid ((<>))
 import Data.Time.Clock (secondsToDiffTime)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.ByteString.UTF8 as BS8
 import Data.URI (URI)
 import Control.Monad.Logger (runStderrLoggingT)
 import Control.Monad.Reader (ReaderT (runReaderT), ask)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Exception (bracket)
 import Control.Concurrent.Async (async, cancel)
-import Control.Concurrent.STM (STM, atomically, TVar, newTVarIO)
+import Control.Concurrent.STM (STM, atomically)
 import Database.Persist.Sql (ConnectionPool)
 import Database.Persist.Postgresql (createPostgresqlPool)
 import Network.HTTP.Client (Manager)

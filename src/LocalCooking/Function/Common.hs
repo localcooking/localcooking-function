@@ -12,11 +12,11 @@ import LocalCooking.Function.System
   (AppM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..))
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
-import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
+import LocalCooking.Database.Schema.Facebook.UserDetails (Unique (FacebookUserDetailsOwner))
 import LocalCooking.Database.Schema.User
   ( StoredUser (..), StoredUserId
   , EntityField
-    (StoredUserEmail, StoredUserPassword, StoredUserCreated, StoredUserConfirmed)
+    (StoredUserEmail, StoredUserCreated, StoredUserConfirmed)
   , Unique (UniqueEmail))
 import LocalCooking.Database.Schema.Facebook.AccessToken
   ( FacebookUserAccessTokenStored (..)
@@ -106,7 +106,7 @@ login Login{..} = do
 -- | If there's no error, the associated userId with the facebookUserId doesn't exist.
 socialLogin :: SocialLogin
             -> AppM (Either (Maybe FacebookLoginReturnError) AuthToken)
-socialLogin socialLogin = case socialLogin of
+socialLogin x = case x of
   SocialLoginFB{..} -> do
     SystemEnv
       { systemEnvManagers = Managers

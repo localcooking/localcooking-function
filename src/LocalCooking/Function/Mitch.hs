@@ -56,7 +56,7 @@ import Data.Text.Permalink (Permalink)
 import Data.Text.Markdown (MarkdownText)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import Data.Image.Source (ImageSource)
-import Data.Time (UTCTime, getCurrentTime, utctDay)
+import Data.Time (getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -142,7 +142,7 @@ submitReview authToken orderId rating heading body images = do
                 mOrder <- get orderId
                 case mOrder of
                   Nothing -> pure Nothing
-                  Just (StoredOrder custId' mealId menuId chefId _ _ _)
+                  Just (StoredOrder custId' mealId _ chefId _ _ _)
                     | custId /= custId' -> pure Nothing
                     | otherwise -> do
                         now <- liftIO getCurrentTime

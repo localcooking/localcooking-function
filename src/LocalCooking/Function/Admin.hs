@@ -11,7 +11,7 @@ import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (.
 import LocalCooking.Database.Schema.User
   ( StoredUser (..)
   , EntityField
-    (StoredUserEmail, StoredUserPassword, StoredUserCreated, StoredUserConfirmed)
+    (StoredUserEmail, StoredUserCreated, StoredUserConfirmed)
   , Unique (UniqueEmail))
 import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
