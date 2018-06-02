@@ -57,8 +57,12 @@ import System.IO.Unsafe (unsafePerformIO)
 
 type AppM = ReaderT SystemEnv IO
 
-execAppM :: NewSystemEnvArgs -> AppM a -> IO a
-execAppM args x = bracket build release $ \(env,_,_,_) -> runReaderT x env
+execAppM :: NewSystemEnvArgs
+         -> (SystemEnv -> IO ()) -- ^ Extra routines to call on open
+         -> AppM a -> IO a
+execAppM args onOpen x = bracket build release $ \(env,_,_,_) -> do
+  onOpen env
+  runReaderT x env
   where
     build = do
       env@SystemEnv
@@ -73,6 +77,7 @@ execAppM args x = bracket build release $ \(env,_,_,_) -> runReaderT x env
           thread2 <- async $ expireThread (3600 * second) email
           thread3 <- async $ calculateThread systemEnvDatabase systemEnvReviews
           pure (env,thread1,thread2,thread3)
+
     release (env,thread1,thread2,thread3) = do
       releaseSystemEnv env
       cancel thread1
