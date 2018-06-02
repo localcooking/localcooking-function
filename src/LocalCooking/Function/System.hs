@@ -37,8 +37,9 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Pool (destroyAllResources)
 import Data.Monoid ((<>))
-import Data.Text (Text)
 import Data.Time.Clock (secondsToDiffTime)
+import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.UTF8 as BS8
 import Data.URI (URI)
@@ -107,11 +108,13 @@ data NewSystemEnvArgs = NewSystemEnvArgs
 
 newSystemEnv :: NewSystemEnvArgs -> IO SystemEnv
 newSystemEnv NewSystemEnvArgs{..} = do
-  let connStr = "host=" <> T.encodeUtf8 dbHost
-              <> " port=" <> BS8.fromString (show dbPort)
-              <> " user=" <> T.encodeUtf8 dbUser
-              <> " password=" <> T.encodeUtf8 dbPassword
-              <> " dbname=" <> T.encodeUtf8 dbName
+  let connStr = T.encodeUtf8 $ T.unwords
+        [ "host=" <> dbHost
+        , "port=" <> T.pack (show dbPort)
+        , "user=" <> dbUser
+        , "password=" <> dbPassword
+        , "dbname=" <> dbName
+        ]
   systemEnvDatabase <- runStderrLoggingT (createPostgresqlPool connStr 10)
   systemEnvManagers <- defManagers
   systemEnvTokenContexts <- atomically defTokenContexts
