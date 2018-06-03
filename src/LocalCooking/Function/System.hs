@@ -48,6 +48,7 @@ import Data.Functor.Identity (Identity)
 import Data.Functor.Compose (Compose)
 import Control.Monad.Logger (runStderrLoggingT)
 import Control.Monad.Reader (ReaderT (runReaderT), ask)
+import Control.Monad.Catch (MonadCatch, MonadThrow, MonadMask)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.IO.Unlift (MonadUnliftIO (..), UnliftIO (..))
 import Control.Monad.Base (MonadBase)
@@ -68,7 +69,8 @@ import System.IO.Unsafe (unsafePerformIO)
 
 newtype SystemM a = SystemM
   { getSystemM :: ReaderT SystemEnv IO a
-  } deriving (Functor, Applicative, Monad, MonadIO, MonadBase IO, MonadBaseControl IO, MonadBaseUnlift IO)
+  } deriving ( Functor, Applicative, Monad, MonadIO, MonadBase IO, MonadBaseControl IO
+             , MonadBaseUnlift IO, MonadCatch, MonadThrow, MonadMask)
 
 instance MonadUnliftIO SystemM where
   askUnliftIO = SystemM $ do
