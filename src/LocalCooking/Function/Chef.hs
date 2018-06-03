@@ -14,7 +14,7 @@ import LocalCooking.Function.Semantics
   ( getChefTags, getMealTags, getMenuTags, getMealIngredientsDiets
   , assignChefTags, assignMealTags, assignMenuTags, assignMealIngredients
   )
-import LocalCooking.Function.System (AppM, SystemEnv (..), getUserId, guardRole)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
@@ -50,14 +50,13 @@ import Data.Aeson.Types (typeMismatch)
 import GHC.Generics (Generic)
 import Control.Monad (forM_, forM)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Reader (ask)
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (selectList, getBy, insert, insert_, update, get)
 
 
 
-addMealTag :: AuthToken -> MealTag -> AppM Bool
+addMealTag :: AuthToken -> MealTag -> SystemM Bool
 addMealTag authToken tag = do
   mUserId <- getUserId authToken
   case mUserId of
@@ -67,11 +66,11 @@ addMealTag authToken tag = do
       if not isAuthorized
         then pure False
         else do
-          SystemEnv{systemEnvDatabase} <- ask
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
           True <$ liftIO (insertMealTag systemEnvDatabase tag)
 
 
-addChefTag :: AuthToken -> ChefTag -> AppM Bool
+addChefTag :: AuthToken -> ChefTag -> SystemM Bool
 addChefTag authToken tag = do
   mUserId <- getUserId authToken
   case mUserId of
@@ -81,18 +80,18 @@ addChefTag authToken tag = do
       if not isAuthorized
         then pure False
         else do
-          SystemEnv{systemEnvDatabase} <- ask
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
           True <$ liftIO (insertChefTag systemEnvDatabase tag)
 
 
 
-getChef :: AuthToken -> AppM (Maybe ChefSettings)
+getChef :: AuthToken -> SystemM (Maybe ChefSettings)
 getChef authToken = do
   mChef <- getChefFromAuthToken authToken
   case mChef of
     Nothing -> pure Nothing
     Just (WithId chefId (StoredChef _ name permalink bio images avatar)) -> do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mTags <- liftIO (getChefTags systemEnvDatabase chefId)
         case mTags of
@@ -109,9 +108,9 @@ getChef authToken = do
 
 
 
-setChef :: AuthToken -> ChefSettings -> AppM (Maybe StoredChefId)
+setChef :: AuthToken -> ChefSettings -> SystemM (Maybe StoredChefId)
 setChef authToken ChefSettings{..} = do
-  SystemEnv{systemEnvDatabase} <- ask
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing
@@ -161,13 +160,13 @@ instance (FromJSON k, FromJSON a) => FromJSON (WithId k a) where
     _ -> typeMismatch "WithId" json
 
 
-getMenus :: AuthToken -> AppM (Maybe [WithId StoredMenuId MenuSettings])
+getMenus :: AuthToken -> SystemM (Maybe [WithId StoredMenuId MenuSettings])
 getMenus authToken = do
   mChef <- getChefFromAuthToken authToken
   case mChef of
     Nothing -> pure Nothing
     Just (WithId chefId _) -> do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
         fmap (Just . catMaybes)
@@ -189,13 +188,13 @@ getMenus authToken = do
                     
 
 
-newMenu :: AuthToken -> MenuSettings -> AppM (Maybe StoredMenuId)
+newMenu :: AuthToken -> MenuSettings -> SystemM (Maybe StoredMenuId)
 newMenu authToken MenuSettings{..} = do
   mChef <- getChefFromAuthToken authToken
   case mChef of
     Nothing -> pure Nothing
     Just (WithId chefId _) -> do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- getBy (UniqueMenuDeadline chefId menuSettingsDeadline)
         case mEnt of
@@ -216,13 +215,13 @@ newMenu authToken MenuSettings{..} = do
             pure (Just menuId)
 
 
-setMenu :: AuthToken -> WithId StoredMenuId MenuSettings -> AppM Bool
+setMenu :: AuthToken -> WithId StoredMenuId MenuSettings -> SystemM Bool
 setMenu authToken (WithId menuId MenuSettings{..}) = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
     then pure False
     else do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       ok <- liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- get menuId
         case mEnt of
@@ -243,13 +242,13 @@ setMenu authToken (WithId menuId MenuSettings{..}) = do
           pure True
 
 
-getMeals :: AuthToken -> StoredMenuId -> AppM (Maybe [WithId StoredMealId MealSettings])
+getMeals :: AuthToken -> StoredMenuId -> SystemM (Maybe [WithId StoredMealId MealSettings])
 getMeals authToken menuId = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
     then pure Nothing
     else do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       xs <- liftIO $ flip runSqlPool systemEnvDatabase $
         selectList [StoredMealStoredMealMenu ==. menuId] []
       fmap (Just . catMaybes) $
@@ -278,13 +277,13 @@ getMeals authToken menuId = do
                     
 
 
-newMeal :: AuthToken -> WithId StoredMenuId MealSettings -> AppM (Maybe StoredMealId)
+newMeal :: AuthToken -> WithId StoredMenuId MealSettings -> SystemM (Maybe StoredMealId)
 newMeal authToken (WithId menuId MealSettings{..}) = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
     then pure Nothing
     else do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- getBy (UniqueMealPermalink menuId mealSettingsPermalink)
         case mEnt of
@@ -312,13 +311,13 @@ newMeal authToken (WithId menuId MealSettings{..}) = do
             pure (Just mealId)
 
 
-setMeal :: AuthToken -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> AppM Bool
+setMeal :: AuthToken -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
 setMeal authToken (WithId menuId (WithId mealId MealSettings{..})) = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
     then pure False
     else do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       ok <- liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- get mealId
         case mEnt of
@@ -343,7 +342,7 @@ setMeal authToken (WithId menuId (WithId mealId MealSettings{..})) = do
           pure True
 
 
-verifyChefhood :: AuthToken -> AppM Bool
+verifyChefhood :: AuthToken -> SystemM Bool
 verifyChefhood authToken = do
   mUserId <- getUserId authToken
   case mUserId of
@@ -351,9 +350,9 @@ verifyChefhood authToken = do
     Just userId -> guardRole userId Chef
 
 
-getChefFromAuthToken :: AuthToken -> AppM (Maybe (WithId StoredChefId StoredChef))
+getChefFromAuthToken :: AuthToken -> SystemM (Maybe (WithId StoredChefId StoredChef))
 getChefFromAuthToken authToken = do
-  SystemEnv{systemEnvDatabase} <- ask
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing

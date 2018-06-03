@@ -18,7 +18,7 @@ import LocalCooking.Semantics.Mitch
 import LocalCooking.Function.Semantics
   ( getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags
   , assignAllergies, assignDiets, getCustDiets, getCustAllergies)
-import LocalCooking.Function.System (AppM, SystemEnv (..), getUserId, guardRole)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
@@ -60,7 +60,6 @@ import Data.Time (getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Reader (ask)
 import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
 import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, count)
@@ -68,13 +67,13 @@ import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, 
 
 
 
-setCustomer :: AuthToken -> Customer -> AppM Bool
+setCustomer :: AuthToken -> Customer -> SystemM Bool
 setCustomer authToken Customer{..} = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       mCust <- liftIO $ flip runSqlPool systemEnvDatabase $ do
         mCustEnt <- getBy (UniqueCustomer userId)
         case mCustEnt of
@@ -95,13 +94,13 @@ setCustomer authToken Customer{..} = do
           pure True
 
 
-getCustomer :: AuthToken -> AppM (Maybe Customer)
+getCustomer :: AuthToken -> SystemM (Maybe Customer)
 getCustomer authToken = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mCustEnt <- getBy (UniqueCustomer userId)
         case mCustEnt of
@@ -123,7 +122,7 @@ getCustomer authToken = do
 
 
 submitReview :: AuthToken -> StoredOrderId -> Rating -> Text
-             -> MarkdownText -> [ImageSource] -> AppM (Maybe StoredReviewId)
+             -> MarkdownText -> [ImageSource] -> SystemM (Maybe StoredReviewId)
 submitReview authToken orderId rating heading body images = do
   mUserId <- getUserId authToken
   case mUserId of
@@ -133,7 +132,7 @@ submitReview authToken orderId rating heading body images = do
       if not ok
         then pure Nothing
         else do
-          SystemEnv{systemEnvDatabase} <- ask
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
           liftIO $ flip runSqlPool systemEnvDatabase $ do
             mCust <- getBy (UniqueCustomer userId)
             case mCust of
@@ -160,9 +159,9 @@ submitReview authToken orderId rating heading body images = do
 
 
 
-getReview :: StoredReviewId -> AppM (Maybe Review)
+getReview :: StoredReviewId -> SystemM (Maybe Review)
 getReview reviewId = do
-  SystemEnv{systemEnvDatabase} <- ask
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
 
   flip runSqlPool systemEnvDatabase $ do
     mReview <- get reviewId
@@ -180,9 +179,9 @@ getReview reviewId = do
 
 
 
-getMealSynopsis :: StoredMealId -> AppM (Maybe MealSynopsis)
+getMealSynopsis :: StoredMealId -> SystemM (Maybe MealSynopsis)
 getMealSynopsis mealId = do
-  SystemEnv{systemEnvDatabase,systemEnvReviews} <- ask
+  SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
 
   mCont <- flip runSqlPool systemEnvDatabase $ do
     mMeal <- get mealId
@@ -222,9 +221,9 @@ getMealSynopsis mealId = do
             }
 
 
-getChefSynopsis :: StoredChefId -> AppM (Maybe ChefSynopsis)
+getChefSynopsis :: StoredChefId -> SystemM (Maybe ChefSynopsis)
 getChefSynopsis chefId = do
-  SystemEnv{systemEnvDatabase,systemEnvReviews} <- ask
+  SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
 
   mStoredChef <- flip runSqlPool systemEnvDatabase $ do
     mChef <- get chefId
@@ -254,9 +253,9 @@ getChefSynopsis chefId = do
             }
 
 
-getChefMenuSynopses :: StoredChefId -> AppM (Maybe [MenuSynopsis])
+getChefMenuSynopses :: StoredChefId -> SystemM (Maybe [MenuSynopsis])
 getChefMenuSynopses chefId = do
-  SystemEnv{systemEnvDatabase} <- ask
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
 
   flip runSqlPool systemEnvDatabase $ do
     mChef <- get chefId
@@ -281,9 +280,9 @@ getChefMenuSynopses chefId = do
                     }
 
 
-getMenuMealSynopses :: StoredMenuId -> AppM (Maybe [MealSynopsis])
+getMenuMealSynopses :: StoredMenuId -> SystemM (Maybe [MealSynopsis])
 getMenuMealSynopses menuId = do
-  SystemEnv{systemEnvDatabase} <- ask
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
 
   mXs <- flip runSqlPool systemEnvDatabase $ do
     mMenu <- get menuId
@@ -296,9 +295,9 @@ getMenuMealSynopses menuId = do
                   getMealSynopsis mealId
 
 
-browseChef :: Permalink -> AppM (Maybe Chef)
+browseChef :: Permalink -> SystemM (Maybe Chef)
 browseChef chefPermalink = do
-  SystemEnv{systemEnvDatabase,systemEnvReviews} <- ask
+  SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
   mDeets <- flip runSqlPool systemEnvDatabase $ do
     mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
     case mChefEnt of
@@ -344,9 +343,9 @@ browseChef chefPermalink = do
                 }
 
 
-browseMenu :: Permalink -> Day -> AppM (Maybe Menu)
+browseMenu :: Permalink -> Day -> SystemM (Maybe Menu)
 browseMenu chefPermalink deadline = do
-  SystemEnv{systemEnvDatabase} <- ask
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
 
   mMenuDeets <- liftIO $ flip runSqlPool systemEnvDatabase $ do
     mChef <- getBy (UniqueChefPermalink chefPermalink)
@@ -380,9 +379,9 @@ browseMenu chefPermalink deadline = do
                 , menuMeals = meals
                 }
 
-browseMeal :: Permalink -> Day -> Permalink -> AppM (Maybe Meal)
+browseMeal :: Permalink -> Day -> Permalink -> SystemM (Maybe Meal)
 browseMeal chefPermalink deadline mealPermalink = do
-  SystemEnv{systemEnvReviews,systemEnvDatabase} <- ask
+  SystemEnv{systemEnvReviews,systemEnvDatabase} <- getSystemEnv
 
   mStoredMeal <- liftIO $ flip runSqlPool systemEnvDatabase $ do
     mChef <- getBy (UniqueChefPermalink chefPermalink)
@@ -440,26 +439,26 @@ browseMeal chefPermalink deadline mealPermalink = do
         }
 
 
-getCart :: AuthToken -> AppM (Maybe [CartEntry])
+getCart :: AuthToken -> SystemM (Maybe [CartEntry])
 getCart authToken = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $
         fmap (Just . fmap (\(Entity _ (CartRelation _ mealId vol time)) -> CartEntry mealId vol time))
           $ selectList [CartRelationCartRelationCustomer ==. userId] []
 
 
 
-addToCart :: AuthToken -> Permalink -> Day -> Permalink -> Int -> AppM Bool
+addToCart :: AuthToken -> Permalink -> Day -> Permalink -> Int -> SystemM Bool
 addToCart authToken chefPermalink deadline mealPermalink vol = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       mMealId <- liftIO (getMealId systemEnvDatabase chefPermalink deadline mealPermalink)
       case mMealId of
         Nothing -> pure False
@@ -479,13 +478,13 @@ addToCart authToken chefPermalink deadline mealPermalink vol = do
 
 -- checkout :: ?
 
-getOrders :: AuthToken -> AppM (Maybe [Order])
+getOrders :: AuthToken -> SystemM (Maybe [Order])
 getOrders authToken = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
       mXs <- flip runSqlPool systemEnvDatabase $ do
         mCust <- getBy (UniqueCustomer userId)
         case mCust of

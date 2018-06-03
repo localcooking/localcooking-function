@@ -9,7 +9,7 @@ module LocalCooking.Function.Common where
 import LocalCooking.Semantics.Common
   (User (..), Login (..), SocialLoginForm (..), Register (..), SocialLogin (..))
 import LocalCooking.Function.System
-  (AppM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..))
+  (SystemM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..), getSystemEnv)
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Database.Schema.Facebook.UserDetails (Unique (FacebookUserDetailsOwner))
@@ -43,7 +43,6 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Aeson as Aeson
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Reader (ask)
 import Control.Concurrent.STM (atomically)
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
@@ -52,9 +51,9 @@ import Network.HTTP.Client (httpLbs, method, responseBody, urlEncodedBody, parse
 
 
 
-newEmailToken :: StoredUserId -> AppM EmailToken
+newEmailToken :: StoredUserId -> SystemM EmailToken
 newEmailToken userId = do
-  SystemEnv{systemEnvTokenContexts} <- ask
+  SystemEnv{systemEnvTokenContexts} <- getSystemEnv
 
   case systemEnvTokenContexts of
     TokenContexts{tokenContextEmail} -> do
@@ -62,9 +61,9 @@ newEmailToken userId = do
       pure token
 
 
-confirmEmail :: EmailToken -> AppM Bool
+confirmEmail :: EmailToken -> SystemM Bool
 confirmEmail token = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- getSystemEnv
 
   case systemEnvTokenContexts of
     TokenContexts{tokenContextEmail} -> do
@@ -83,9 +82,9 @@ confirmEmail token = do
                 pure True
 
 
-login :: Login -> AppM (Maybe AuthToken)
+login :: Login -> SystemM (Maybe AuthToken)
 login Login{..} = do
-  SystemEnv{systemEnvDatabase,systemEnvTokenContexts} <- ask
+  SystemEnv{systemEnvDatabase,systemEnvTokenContexts} <- getSystemEnv
 
   mUserId <- liftIO $ flip runSqlPool systemEnvDatabase $ do
     mEnt <- getBy (UniqueEmail loginEmail)
@@ -105,7 +104,7 @@ login Login{..} = do
 
 -- | If there's no error, the associated userId with the facebookUserId doesn't exist.
 socialLogin :: SocialLogin
-            -> AppM (Either (Maybe FacebookLoginReturnError) AuthToken)
+            -> SystemM (Either (Maybe FacebookLoginReturnError) AuthToken)
 socialLogin x = case x of
   SocialLoginFB{..} -> do
     SystemEnv
@@ -120,7 +119,7 @@ socialLogin x = case x of
       , systemEnvTokenContexts = TokenContexts
         { tokenContextAuth
         }
-      } <- ask
+      } <- getSystemEnv
     --  FIXME needs a HTTP reach-around for FB login ><
     eLoginErr <- liftIO $ handleFacebookLoginReturn
       managersFacebook
@@ -144,7 +143,7 @@ socialLogin x = case x of
             pure (Right token)
 
 
-register :: Register -> AppM Bool
+register :: Register -> SystemM Bool
 register Register{..} = do
   SystemEnv
     { systemEnvDatabase
@@ -158,7 +157,7 @@ register Register{..} = do
       { managersSparkPost
       , managersReCaptcha
       }
-    } <- ask
+    } <- getSystemEnv
 
   resp <- liftIO $ do
     req <- parseRequest $ T.unpack $ printURI googleReCaptchaVerifyURI
@@ -208,9 +207,9 @@ register Register{..} = do
 
 
 -- | Something like "get user details"
-getUser :: AuthToken -> AppM (Maybe User)
+getUser :: AuthToken -> SystemM (Maybe User)
 getUser authToken = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- getSystemEnv
 
   case systemEnvTokenContexts of
     TokenContexts{tokenContextAuth} -> do
@@ -242,9 +241,9 @@ getUser authToken = do
 
 -- FIXME TODO changePassword?
 -- | "set user details"
-setUser :: AuthToken -> User -> AppM Bool
+setUser :: AuthToken -> User -> SystemM Bool
 setUser authToken User{..} = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- ask
+  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- getSystemEnv
 
   case systemEnvTokenContexts of
     TokenContexts{tokenContextAuth} -> do

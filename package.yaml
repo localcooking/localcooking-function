@@ -37,7 +37,10 @@ dependencies:
 - hashable
 - http-client
 - http-client-tls
+- monad-control
+- monad-control-aligned
 - monad-logger
+- monad-unlift
 - mtl
 - newtype
 - persistent
@@ -49,7 +52,9 @@ dependencies:
 - time
 - timemap >= 0.0.7
 - tmapmvar
+- transformers-base
 - unordered-containers
+- unliftio-core
 - utf8-string
 
 library:

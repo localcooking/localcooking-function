@@ -6,7 +6,7 @@
 module LocalCooking.Function.Admin where
 
 import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..), Register (..))
-import LocalCooking.Function.System (AppM, SystemEnv (..), getUserId, guardRole)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
 import LocalCooking.Database.Schema.User
   ( StoredUser (..)
@@ -22,20 +22,19 @@ import qualified Data.Set as Set
 import Data.Time (getCurrentTime)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Reader (ask)
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, update)
 
 
 
-getUsers :: AuthToken -> AppM (Maybe [User])
+getUsers :: AuthToken -> SystemM (Maybe [User])
 getUsers authToken = do
   isAuthorized <- verifyAdminhood authToken
   if not isAuthorized
     then pure Nothing
     else do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
 
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         xs <- selectList [] []
@@ -58,13 +57,13 @@ getUsers authToken = do
 
 
 
-setUser :: AuthToken -> User -> AppM Bool
+setUser :: AuthToken -> User -> SystemM Bool
 setUser authToken User{..} = do
   isAuthorized <- verifyAdminhood authToken
   if not isAuthorized
     then pure False
     else do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
 
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         update userId
@@ -91,13 +90,13 @@ setUser authToken User{..} = do
 
 
 
-addUser :: AuthToken -> Register -> AppM Bool
+addUser :: AuthToken -> Register -> SystemM Bool
 addUser authToken Register{..} = do
   isAuthorized <- verifyAdminhood authToken
   if not isAuthorized
     then pure False
     else do
-      SystemEnv{systemEnvDatabase} <- ask
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
 
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- getBy (UniqueEmail registerEmail)
@@ -115,7 +114,7 @@ addUser authToken Register{..} = do
 
 
 
-verifyAdminhood :: AuthToken -> AppM Bool
+verifyAdminhood :: AuthToken -> SystemM Bool
 verifyAdminhood authToken = do
   mUserId <- getUserId authToken
   case mUserId of

@@ -4,10 +4,13 @@
   , RecordWildCards
   , GeneralizedNewtypeDeriving
   , DeriveFunctor
+  , UndecidableInstances
+  , FlexibleInstances
+  , MultiParamTypeClasses
   #-}
 
 module LocalCooking.Function.System
-  ( AppM, execAppM
+  ( SystemM, execSystemM
   , SystemEnv (..)
   , NewSystemEnvArgs (..)
   , Managers (..)
@@ -15,6 +18,7 @@ module LocalCooking.Function.System
   , Keys (..)
   , getUserId
   , guardRole
+  , getSystemEnv
   ) where
 
 import LocalCooking.Function.System.AccessToken (AccessTokenContext, newAccessTokenContext, expireThread, lookupAccess)
@@ -40,9 +44,16 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.URI (URI)
+import Data.Functor.Identity (Identity)
+import Data.Functor.Compose (Compose)
 import Control.Monad.Logger (runStderrLoggingT)
 import Control.Monad.Reader (ReaderT (runReaderT), ask)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.IO.Unlift (MonadUnliftIO (..), UnliftIO (..))
+import Control.Monad.Base (MonadBase)
+import Control.Monad.Trans.Control (MonadBaseControl)
+import qualified Control.Monad.Trans.Control.Aligned as Aligned
+import Control.Monad.Trans.Unlift (MonadBaseUnlift)
 import Control.Exception (bracket)
 import Control.Concurrent.Async (async, cancel)
 import Control.Concurrent.STM (STM, atomically)
@@ -55,12 +66,31 @@ import System.IO.Unsafe (unsafePerformIO)
 
 
 
-type AppM = ReaderT SystemEnv IO
+newtype SystemM a = SystemM
+  { getSystemM :: ReaderT SystemEnv IO a
+  } deriving (Functor, Applicative, Monad, MonadIO, MonadBase IO, MonadBaseControl IO, MonadBaseUnlift IO)
 
-execAppM :: NewSystemEnvArgs
+instance MonadUnliftIO SystemM where
+  askUnliftIO = SystemM $ do
+    UnliftIO f <- askUnliftIO
+    pure $ UnliftIO $ f . getSystemM
+  withRunInIO runner = SystemM $ withRunInIO $ \fromM -> runner (fromM . getSystemM)
+
+instance Aligned.MonadBaseControl IO SystemM (Compose Identity Identity) where
+  liftBaseWith f = SystemM $ Aligned.liftBaseWith $ \runInBase ->
+    f (runInBase . getSystemM)
+  restoreM = SystemM . Aligned.restoreM
+
+
+
+getSystemEnv :: SystemM SystemEnv
+getSystemEnv = SystemM ask
+
+
+execSystemM :: NewSystemEnvArgs
          -> (SystemEnv -> IO ()) -- ^ Extra routines to call on open
-         -> AppM a -> IO a
-execAppM args onOpen x = bracket build release $ \(env,_,_,_) -> do
+         -> SystemM a -> IO a
+execSystemM args onOpen (SystemM x) = bracket build release $ \(env,_,_,_) -> do
   onOpen env
   runReaderT x env
   where
@@ -205,15 +235,15 @@ instance FromJSON Keys where
 -- * Utils
 
 
-getUserId :: AuthToken -> AppM (Maybe StoredUserId)
+getUserId :: AuthToken -> SystemM (Maybe StoredUserId)
 getUserId authToken = do
-  SystemEnv{systemEnvTokenContexts} <- ask
+  SystemEnv{systemEnvTokenContexts} <- getSystemEnv
   case systemEnvTokenContexts of
     TokenContexts{tokenContextAuth} ->
       liftIO (lookupAccess tokenContextAuth authToken)
 
 
-guardRole :: StoredUserId -> UserRole -> AppM Bool
+guardRole :: StoredUserId -> UserRole -> SystemM Bool
 guardRole userId r = do
-  SystemEnv{systemEnvDatabase} <- ask
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO (hasRole systemEnvDatabase userId r)
