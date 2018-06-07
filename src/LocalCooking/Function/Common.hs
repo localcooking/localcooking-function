@@ -106,7 +106,7 @@ login Login{..} = do
 socialLogin :: SocialLogin
             -> SystemM (Either (Maybe FacebookLoginReturnError) AuthToken)
 socialLogin x = case x of
-  SocialLoginFB{..} -> do
+  SocialLoginFB{socialLoginFB} -> do
     SystemEnv
       { systemEnvManagers = Managers
         { managersFacebook
@@ -125,7 +125,7 @@ socialLogin x = case x of
       managersFacebook
       keysFacebook
       systemEnvFBRedirect
-      socialLoginFBCode
+      socialLoginFB
     case eLoginErr of
       Left e -> pure $ Left $ Just e
       Right (fbToken,fbUserId) -> do
