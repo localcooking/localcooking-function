@@ -63,7 +63,7 @@ newEmailToken userId = do
       pure token
 
 
-confirmEmail :: EmailToken -> SystemM (Maybe ConfirmEmailError)
+confirmEmail :: EmailToken -> SystemM ConfirmEmailError
 confirmEmail token = do
   SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- getSystemEnv
 
@@ -71,17 +71,17 @@ confirmEmail token = do
     TokenContexts{tokenContextEmail} -> do
       mUserId <- liftIO (lookupAccess tokenContextEmail token)
       case mUserId of
-        Nothing -> pure (Just ConfirmEmailTokenNonexistent)
+        Nothing -> pure ConfirmEmailTokenNonexistent
         Just userId -> do
           liftIO $ flip runSqlPool systemEnvDatabase $ do
             -- FIXME lightweight existence checker?
             mUser <- get userId
             case mUser of
-              Nothing -> pure (Just ConfirmEmailUserNonexistent)
+              Nothing -> pure ConfirmEmailUserNonexistent
               Just _ -> do
                 liftIO $ atomically $ revokeAccess tokenContextEmail token
                 update userId [StoredUserConfirmed =. True]
-                pure Nothing
+                pure ConfirmEmailOk
 
 
 login :: Login -> SystemM (Maybe AuthToken)
