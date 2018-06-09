@@ -56,10 +56,12 @@ confirmEmailRequest key email emailToken = do
         , requestBody = RequestBodyLBS (Aeson.encode body)
         }
       body = object
-        [ "recipients" .= object
-          [ "address" .= email
-          , "substitution_data" .= object
-            [ "emailCode" .= emailToken
+        [ "recipients" .=
+          [ object
+            [ "address" .= email
+            , "substitution_data" .= object
+              [ "emailCode" .= emailToken
+              ]
             ]
           ]
         , "content" .= object
