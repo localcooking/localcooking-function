@@ -7,7 +7,7 @@
 module LocalCooking.Function.Common where
 
 import LocalCooking.Semantics.Common
-  (User (..), Login (..), SocialLoginForm (..), Register (..), SocialLogin (..))
+  (User (..), Login (..), SocialLoginForm (..), Register (..), RegisterError (..), SocialLogin (..))
 import LocalCooking.Function.System
   (SystemM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..), getSystemEnv)
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
@@ -143,7 +143,8 @@ socialLogin x = case x of
             pure (Right token)
 
 
-register :: Register -> SystemM Bool
+-- FIXME register errors
+register :: Register -> SystemM (Maybe RegisterError)
 register Register{..} = do
   SystemEnv
     { systemEnvDatabase
@@ -173,11 +174,11 @@ register Register{..} = do
   case Aeson.decode (responseBody resp) of
     Nothing -> do
       liftIO $ putStrLn $ "Couldn't parse response body: " ++ show (responseBody resp)
-      pure False
+      pure $ Just $ RegisterDecodingError (responseBody resp)
     Just (ReCaptchaVerifyResponse success)
       | not success -> do
         liftIO $ putStrLn $ "recaptcha failure: " ++ show (responseBody resp)
-        pure False
+        pure $ Just $ RegisterReCaptchaFailure (responseBody resp)
       | otherwise -> do
         mUserId <- liftIO $ flip runSqlPool systemEnvDatabase $ do
           mEnt <- getBy (UniqueEmail registerEmail)
@@ -193,7 +194,7 @@ register Register{..} = do
                     Just userFb -> insert_ (FacebookUserDetails userFb userId)
               pure (Just userId)
         case mUserId of
-          Nothing -> pure False
+          Nothing -> pure $ Just RegisterEmailTaken
           Just userId -> do
             emailToken <- newEmailToken userId
             req <- liftIO (confirmEmailRequest sparkPostKey registerEmail emailToken)
@@ -203,7 +204,7 @@ register Register{..} = do
               putStrLn $ show req
               putStrLn $ show resp
             -- FIXME TODO note - the redirect URI is defined in the spark post template
-            pure True
+            pure Nothing
 
 
 -- | Something like "get user details"
