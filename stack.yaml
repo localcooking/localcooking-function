@@ -40,7 +40,7 @@ packages:
 - ../localcooking-fb/
 - location:
     git: git@git.localcooking.com:private-tooling/emailaddress.git
-    commit: 31540c8305e0db6b98dcc1beb79afd1e9ed35bb8
+    commit: d4c426e1a9c6d5b53be4782b072cf0746049bfa7
   extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # using the same syntax as the packages field.
@@ -50,6 +50,7 @@ extra-deps:
 - attoparsec-base64-0.0.0
 - saltine-0.1.0.0
 - timemap-0.0.7
+- quickcheck-combinators-0.0.4
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
