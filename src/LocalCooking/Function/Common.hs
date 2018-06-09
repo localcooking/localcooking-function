@@ -37,6 +37,7 @@ import Google.Keys
 import Data.URI (printURI)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set
+import Data.Monoid ((<>))
 import Data.Time (getCurrentTime)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -44,6 +45,7 @@ import qualified Data.Aeson as Aeson
 import Control.Monad (forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Concurrent.STM (atomically)
+import Control.Logging (log')
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, update, get)
@@ -199,10 +201,7 @@ register Register{..} = do
             emailToken <- newEmailToken userId
             req <- liftIO (confirmEmailRequest sparkPostKey registerEmail emailToken)
             resp <- liftIO (httpLbs req managersSparkPost)
-            liftIO $ do
-              putStrLn $ "Sent email confirmation:"
-              putStrLn $ show req
-              putStrLn $ show resp
+            log' $ "Sent email confirmation: " <> T.pack (show req) <> ", " <> T.pack (show resp)
             -- FIXME TODO note - the redirect URI is defined in the spark post template
             pure Nothing
 

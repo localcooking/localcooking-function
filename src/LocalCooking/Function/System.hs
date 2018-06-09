@@ -59,6 +59,7 @@ import Control.Monad.Trans.Unlift (MonadBaseUnlift)
 import Control.Exception (bracket)
 import Control.Concurrent.Async (async, cancel)
 import Control.Concurrent.STM (STM, atomically)
+import Control.Logging (withStderrLogging)
 import Database.Persist.Sql (ConnectionPool)
 import Database.Persist.Postgresql (createPostgresqlPool)
 import Network.HTTP.Client (Manager)
@@ -92,8 +93,10 @@ getSystemEnv = SystemM ask
 
 execSystemM :: NewSystemEnvArgs
             -> SystemM a -> IO a
-execSystemM args (SystemM x) = bracket build release $ \(env,_,_,_) -> do
-  runReaderT x env
+execSystemM args (SystemM x) =
+  withStderrLogging $
+    bracket build release $ \(env,_,_,_) ->
+      runReaderT x env
   where
     build = do
       env@SystemEnv

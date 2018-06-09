@@ -48,6 +48,7 @@ packages:
 extra-deps:
 - aeson-attoparsec-0.0.0
 - attoparsec-base64-0.0.0
+- logging-3.0.5
 - saltine-0.1.0.0
 - timemap-0.0.7
 - quickcheck-combinators-0.0.4

@@ -38,6 +38,7 @@ dependencies:
 - hashable
 - http-client
 - http-client-tls
+- logging
 - monad-control
 - monad-control-aligned
 - monad-logger
