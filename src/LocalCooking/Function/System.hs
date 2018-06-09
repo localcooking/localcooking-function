@@ -27,6 +27,7 @@ import LocalCooking.Common.AccessToken.Email (EmailToken)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Password (HashedPassword)
 import LocalCooking.Common.User.Role (UserRole)
+import LocalCooking.Database.Schema (migrateAll)
 import LocalCooking.Database.Schema.User (StoredUserId)
 import LocalCooking.Database.Query.Salt (getPasswordSalt)
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
@@ -90,10 +91,8 @@ getSystemEnv = SystemM ask
 
 
 execSystemM :: NewSystemEnvArgs
-         -> (SystemEnv -> IO ()) -- ^ Extra routines to call on open
-         -> SystemM a -> IO a
-execSystemM args onOpen (SystemM x) = bracket build release $ \(env,_,_,_) -> do
-  onOpen env
+            -> SystemM a -> IO a
+execSystemM args (SystemM x) = bracket build release $ \(env,_,_,_) -> do
   runReaderT x env
   where
     build = do
@@ -150,6 +149,7 @@ newSystemEnv NewSystemEnvArgs{..} = do
         , "dbname=" <> dbName
         ]
   systemEnvDatabase <- runStderrLoggingT (createPostgresqlPool connStr 10)
+  migrateAll systemEnvDatabase
   systemEnvManagers <- defManagers
   systemEnvTokenContexts <- atomically defTokenContexts
   systemEnvSalt <- getPasswordSalt systemEnvDatabase
