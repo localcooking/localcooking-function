@@ -198,6 +198,7 @@ register Register{..} = do
         case mUserId of
           Nothing -> pure $ Just RegisterEmailTaken
           Just userId -> do
+            log' "Registered user!"
             emailToken <- newEmailToken userId
             req <- liftIO (confirmEmailRequest sparkPostKey registerEmail emailToken)
             resp <- liftIO (httpLbs req managersSparkPost)
