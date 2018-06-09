@@ -7,7 +7,7 @@
 module LocalCooking.Function.Common where
 
 import LocalCooking.Semantics.Common
-  (User (..), Login (..), SocialLoginForm (..), Register (..), RegisterError (..), SocialLogin (..))
+  (User (..), Login (..), SocialLoginForm (..), Register (..), RegisterError (..), ConfirmEmailError (..), SocialLogin (..))
 import LocalCooking.Function.System
   (SystemM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..), getSystemEnv)
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
@@ -63,7 +63,7 @@ newEmailToken userId = do
       pure token
 
 
-confirmEmail :: EmailToken -> SystemM Bool
+confirmEmail :: EmailToken -> SystemM (Maybe ConfirmEmailError)
 confirmEmail token = do
   SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- getSystemEnv
 
@@ -71,17 +71,17 @@ confirmEmail token = do
     TokenContexts{tokenContextEmail} -> do
       mUserId <- liftIO (lookupAccess tokenContextEmail token)
       case mUserId of
-        Nothing -> pure False
+        Nothing -> pure (Just ConfirmEmailTokenNonexistent)
         Just userId -> do
           liftIO $ flip runSqlPool systemEnvDatabase $ do
             -- FIXME lightweight existence checker?
             mUser <- get userId
             case mUser of
-              Nothing -> pure False
+              Nothing -> pure (Just ConfirmEmailUserNonexistent)
               Just _ -> do
                 liftIO $ atomically $ revokeAccess tokenContextEmail token
                 update userId [StoredUserConfirmed =. True]
-                pure True
+                pure Nothing
 
 
 login :: Login -> SystemM (Maybe AuthToken)
