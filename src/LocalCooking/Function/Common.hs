@@ -7,7 +7,7 @@
 module LocalCooking.Function.Common where
 
 import LocalCooking.Semantics.Common
-  (User (..), Login (..), SocialLoginForm (..), Register (..), RegisterError (..), ConfirmEmailError (..), SocialLogin (..))
+  (User (..), SetUser (..), Login (..), SocialLoginForm (..), Register (..), RegisterError (..), ConfirmEmailError (..), SocialLogin (..))
 import LocalCooking.Function.System
   (SystemM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..), getSystemEnv)
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
@@ -16,7 +16,7 @@ import LocalCooking.Database.Schema.Facebook.UserDetails (Unique (FacebookUserDe
 import LocalCooking.Database.Schema.User
   ( StoredUser (..), StoredUserId
   , EntityField
-    (StoredUserEmail, StoredUserCreated, StoredUserConfirmed)
+    (StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword)
   , Unique (UniqueEmail))
 import LocalCooking.Database.Schema.Facebook.AccessToken
   ( FacebookUserAccessTokenStored (..)
@@ -240,10 +240,10 @@ getUser authToken = do
                   }
 
 
--- FIXME TODO changePassword?
+-- FIXME TODO changePassword? Better error symbols?
 -- | "set user details"
-setUser :: AuthToken -> User -> SystemM Bool
-setUser authToken User{..} = do
+setUser :: AuthToken -> SetUser -> SystemM Bool
+setUser authToken SetUser{..} = do
   SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- getSystemEnv
 
   case systemEnvTokenContexts of
@@ -252,29 +252,25 @@ setUser authToken User{..} = do
       case mUserId of
         Nothing -> pure False
         Just k
-          | k /= userId -> pure False
+          | k /= setUserId -> pure False
           | otherwise ->
               liftIO $ flip runSqlPool systemEnvDatabase $ do
-                update userId
-                  [ StoredUserCreated =. userCreated
-                  , StoredUserEmail =. userEmail
-                  , StoredUserConfirmed =. userEmailConfirmed
-                  ]
-                case userSocial of
-                  SocialLoginForm mFb -> do
-                    case mFb of
-                      Nothing -> deleteBy (FacebookUserDetailsOwner userId)
-                      Just userFb -> insert_ (FacebookUserDetails userFb userId)
-                xs <- selectList [UserRoleStoredUserRoleOwner ==. userId] []
-                rolesRef <- liftIO (newIORef (Set.fromList userRoles))
-                forM_ xs $ \(Entity roleId (UserRoleStored role _)) -> do
-                  roles' <- liftIO (readIORef rolesRef)
-                  if Set.member role roles'
-                    then liftIO $ modifyIORef rolesRef $ Set.delete role
-                    else delete roleId
-                rolesLeft <- liftIO (readIORef rolesRef)
-                forM_ rolesLeft $ \role -> insert_ (UserRoleStored role userId)
-                pure True
+                mUser <- get setUserId
+                case mUser of
+                  Nothing -> pure False
+                  Just (StoredUser _ _ pw _)
+                    | pw /= setUserOldPassword -> pure False
+                    | otherwise -> do
+                      update setUserId
+                        [ StoredUserEmail =. setUserEmail
+                        , StoredUserPassword =. setUserNewPassword
+                        ]
+                      case setUserSocial of
+                        SocialLoginForm mFb -> do
+                          case mFb of
+                            Nothing -> deleteBy (FacebookUserDetailsOwner setUserId)
+                            Just userFb -> insert_ (FacebookUserDetails userFb setUserId)
+                      pure True
 
 
 -- TODO FIXME individual field validation
