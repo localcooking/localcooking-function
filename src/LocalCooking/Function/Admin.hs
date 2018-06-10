@@ -46,7 +46,7 @@ getUsers authToken = do
             { userId = k
             , userCreated = created
             , userEmail = email
-            , userSocial = SocialLoginForm
+            , userSocialLogin = SocialLoginForm
               { socialLoginFormFb = case mFb of
                 Nothing -> Nothing
                 Just (Entity _ (FacebookUserDetails uId _)) -> Just uId
@@ -71,7 +71,7 @@ setUser authToken User{..} = do
           , StoredUserEmail =. userEmail
           , StoredUserConfirmed =. userEmailConfirmed
           ]
-        case userSocial of
+        case userSocialLogin of
           SocialLoginForm mFb -> do
             case mFb of
               Nothing -> deleteBy (FacebookUserDetailsOwner userId)
