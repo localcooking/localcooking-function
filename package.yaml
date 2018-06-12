@@ -27,10 +27,12 @@ dependencies:
 - localcooking-fb
 - localcooking-db
 - base >= 4.7 && < 5
+- binary
 - aeson
 - async
 - attoparsec-uri >= 0.0.4
 - bytestring
+- conduit
 - containers
 - data-default
 - emailaddress >= 0.2.0.1
@@ -47,6 +49,7 @@ dependencies:
 - newtype
 - persistent
 - persistent-postgresql
+- resourcet
 - resource-pool
 - stm
 - strict
@@ -58,6 +61,9 @@ dependencies:
 - unordered-containers
 - unliftio-core
 - utf8-string
+- wai
+- xml-conduit
+- xml-types
 
 library:
   source-dirs: src
