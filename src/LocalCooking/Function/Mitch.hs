@@ -25,6 +25,8 @@ import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
 import LocalCooking.Common.Rating (Rating)
 import qualified LocalCooking.Common.User.Role as UserRole
+import LocalCooking.Common.Tag.Meal (MealTag)
+import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Database.Query.IngredientDiet (getIngredientByName)
 import LocalCooking.Database.Query.Semantics (getMealId)
 import LocalCooking.Database.Schema.User.Customer
@@ -50,12 +52,15 @@ import LocalCooking.Database.Schema.Semantics
     )
   , Unique (UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline, UniqueCartRelation)
   )
-import LocalCooking.Database.Schema.Tag.Meal (StoredMealTag)
+import LocalCooking.Database.Schema.Tag.Meal (StoredMealTag (..))
+import LocalCooking.Database.Schema.Tag.Chef (StoredChefTag (..))
 
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Text.Permalink (Permalink)
 import Data.Text.Markdown (MarkdownText)
+import Data.Monoid ((<>))
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import Data.Image.Source (ImageSource)
 import Data.Time (getCurrentTime, utctDay)
@@ -63,9 +68,10 @@ import Data.Time.Calendar (Day)
 import Text.Search.Sphinx (query, defaultConfig)
 import Text.Search.Sphinx.Types
   (MatchMode (Any), Result (Ok), QueryResult (matches), Match (documentId))
-import Text.Search.Sphinx.Configuration (Configuration (mode, port))
+import Text.Search.Sphinx.Configuration (Configuration (mode, port, limit))
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Logging (log')
 import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
 import Database.Persist.Sql (runSqlPool, toSqlKey)
 import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, count)
@@ -513,7 +519,7 @@ getOrders authToken = do
                   }
 
 
-searchMealTags :: Text -> SystemM [Entity StoredMealTag]
+searchMealTags :: Text -> SystemM [MealTag]
 searchMealTags term = do
   xs' <- liftIO (query config "mealtags" term)
   case xs' of
@@ -523,10 +529,35 @@ searchMealTags term = do
       flip runSqlPool systemEnvDatabase $
         fmap catMaybes $ forM ks $ \k -> do
           mX <- get k
-          pure (Entity k <$> mX)
-    _ -> pure []
+          pure ((\(StoredMealTag x) -> x) <$> mX)
+    e -> do
+      log' $ "Sphinx error: " <> T.pack (show e)
+      pure []
   where
     config = defaultConfig
       { port = 9312
       , mode = Any
+      , limit = 10
+      }
+
+
+searchChefTags :: Text -> SystemM [ChefTag]
+searchChefTags term = do
+  xs' <- liftIO (query config "cheftags" term)
+  case xs' of
+    Ok xs -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      let ks = (toSqlKey . documentId) <$> matches xs
+      flip runSqlPool systemEnvDatabase $
+        fmap catMaybes $ forM ks $ \k -> do
+          mX <- get k
+          pure ((\(StoredChefTag x) -> x) <$> mX)
+    e -> do
+      log' $ "Sphinx error: " <> T.pack (show e)
+      pure []
+  where
+    config = defaultConfig
+      { port = 9312
+      , mode = Any
+      , limit = 10
       }
