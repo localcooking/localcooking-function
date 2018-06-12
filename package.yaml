@@ -51,6 +51,7 @@ dependencies:
 - persistent-postgresql
 - resourcet
 - resource-pool
+- sphinx
 - stm
 - strict
 - text

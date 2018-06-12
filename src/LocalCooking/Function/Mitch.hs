@@ -2,6 +2,7 @@
     NamedFieldPuns
   , RecordWildCards
   , ScopedTypeVariables
+  , OverloadedStrings
   #-}
 
 module LocalCooking.Function.Mitch where
@@ -49,6 +50,7 @@ import LocalCooking.Database.Schema.Semantics
     )
   , Unique (UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline, UniqueCartRelation)
   )
+import LocalCooking.Database.Schema.Tag.Meal (StoredMealTag)
 
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
@@ -58,10 +60,14 @@ import Data.IORef (newIORef, readIORef, modifyIORef)
 import Data.Image.Source (ImageSource)
 import Data.Time (getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
+import Text.Search.Sphinx (query, defaultConfig)
+import Text.Search.Sphinx.Types
+  (MatchMode (Any), Result (Ok), QueryResult (matches), Match (documentId))
+import Text.Search.Sphinx.Configuration (Configuration (mode, port))
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
-import Database.Persist.Sql (runSqlPool)
+import Database.Persist.Sql (runSqlPool, toSqlKey)
 import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, count)
 
 
@@ -507,7 +513,20 @@ getOrders authToken = do
                   }
 
 
--- searchMealTags :: Text -> SystemM [MealTag]
--- searchMealTags term =
---   where
-    
+searchMealTags :: Text -> SystemM [Entity StoredMealTag]
+searchMealTags term = do
+  xs' <- liftIO (query config "mealtags" term)
+  case xs' of
+    Ok xs -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      let ks = (toSqlKey . documentId) <$> matches xs
+      flip runSqlPool systemEnvDatabase $
+        fmap catMaybes $ forM ks $ \k -> do
+          mX <- get k
+          pure (Entity k <$> mX)
+    _ -> pure []
+  where
+    config = defaultConfig
+      { port = 9312
+      , mode = Any
+      }
