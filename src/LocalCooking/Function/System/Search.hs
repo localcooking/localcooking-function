@@ -1,13 +1,15 @@
 {-# LANGUAGE
     OverloadedStrings
-  , PartialTypeSignatures
+  , FlexibleContexts
   #-}
 
 module LocalCooking.Function.System.Search where
 
 import LocalCooking.Common.Tag.Meal (MealTag (..))
+import LocalCooking.Common.Tag.Chef (ChefTag (..))
 import LocalCooking.Common.Tag (Tag (..))
 import LocalCooking.Database.Schema.Tag.Meal (StoredMealTag (..))
+import LocalCooking.Database.Schema.Tag.Chef (StoredChefTag (..))
 
 import Data.Default (def)
 import Data.Text (Text)
@@ -23,36 +25,52 @@ import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans.Resource (ResourceT, runResourceT)
 
 import Network.Wai (StreamingBody)
-import Database.Persist (Entity (..))
+import Database.Persist (Entity (..), Key)
 import Database.Persist.Class (selectSource)
 import Database.Persist.Sql (SqlBackend, ConnectionPool, runSqlPool)
 
 
 
-mealTagsHTTPStream :: ConnectionPool -> StreamingBody
-mealTagsHTTPStream backend chunk flush =
+-- | Response handler for populating sphinx
+sphinxDocumentHTTPStream :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
+                         -> ConnectionPool -> StreamingBody
+sphinxDocumentHTTPStream doc backend chunk flush =
   runResourceT (runSqlPool (stream $$ runner) backend)
   where
     runner :: ConduitT Builder o (ReaderT SqlBackend (ResourceT IO)) ()
     runner = CL.foldMapM (\x -> liftIO $ chunk x >> flush)
     stream :: ConduitT () Builder (ReaderT SqlBackend (ResourceT IO)) ()
-    stream = mealTagsDocument
-          $= renderBuilder def
+    stream = doc $= renderBuilder def
 
 
 mealTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
 mealTagsDocument = do
   mapM_ yield startEvents
-  selectSource [] [] $= CL.concatMap mealTagEntityToXMLEvent
+  selectSource [] []
+    $= CL.concatMap
+         ( extractEntityToXMLEvent
+           (\(StoredMealTag (MealTag (Tag x))) -> x)
+         )
+  mapM_ yield endEvents
+
+
+chefTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
+chefTagsDocument = do
+  mapM_ yield startEvents
+  selectSource [] []
+    $= CL.concatMap
+         ( extractEntityToXMLEvent
+           (\(StoredChefTag (ChefTag (Tag x))) -> x)
+         )
   mapM_ yield endEvents
 
 
 
-mealTagEntityToXMLEvent :: Entity StoredMealTag -> [XML.Event]
-mealTagEntityToXMLEvent (Entity mealId (StoredMealTag (MealTag (Tag mealTag)))) =
-  [ XML.EventBeginElement document [("id", [XML.ContentText $ T.pack $ show mealId])]
+extractEntityToXMLEvent :: Show (Key a) => (a -> Text) -> Entity a -> [XML.Event]
+extractEntityToXMLEvent get (Entity idx x) =
+  [ XML.EventBeginElement document [("id", [XML.ContentText $ T.pack $ show idx])]
   , XML.EventBeginElement content []
-  , XML.EventContent (XML.ContentText mealTag)
+  , XML.EventContent (XML.ContentText (get x))
   , XML.EventEndElement content
   , XML.EventEndElement document
   ]
