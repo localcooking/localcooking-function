@@ -519,7 +519,7 @@ getOrders authToken = do
                   }
 
 
-searchMealTags :: Text -> SystemM [MealTag]
+searchMealTags :: Text -> SystemM (Maybe [MealTag])
 searchMealTags term = do
   xs' <- liftIO (query config "mealtags" term)
   case xs' of
@@ -527,12 +527,12 @@ searchMealTags term = do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       let ks = (toSqlKey . documentId) <$> matches xs
       flip runSqlPool systemEnvDatabase $
-        fmap catMaybes $ forM ks $ \k -> do
+        fmap (Just . catMaybes) $ forM ks $ \k -> do
           mX <- get k
           pure ((\(StoredMealTag x) -> x) <$> mX)
     e -> do
       log' $ "Sphinx error: " <> T.pack (show e)
-      pure []
+      pure Nothing
   where
     config = defaultConfig
       { port = 9312
@@ -541,7 +541,7 @@ searchMealTags term = do
       }
 
 
-searchChefTags :: Text -> SystemM [ChefTag]
+searchChefTags :: Text -> SystemM (Maybe [ChefTag])
 searchChefTags term = do
   xs' <- liftIO (query config "cheftags" term)
   case xs' of
@@ -549,12 +549,12 @@ searchChefTags term = do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       let ks = (toSqlKey . documentId) <$> matches xs
       flip runSqlPool systemEnvDatabase $
-        fmap catMaybes $ forM ks $ \k -> do
+        fmap (Just . catMaybes) $ forM ks $ \k -> do
           mX <- get k
           pure ((\(StoredChefTag x) -> x) <$> mX)
     e -> do
       log' $ "Sphinx error: " <> T.pack (show e)
-      pure []
+      pure Nothing
   where
     config = defaultConfig
       { port = 9312
