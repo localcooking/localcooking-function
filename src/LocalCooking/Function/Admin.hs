@@ -59,38 +59,44 @@ getUsers authToken = do
 
 
 setUser :: AuthToken -> SetUser -> SystemM Bool
-setUser authToken SetUser{setUserUser = User{..}, setUserNewPassword} = do
-  isAuthorized <- verifyAdminhood authToken
-  if not isAuthorized
-    then pure False
-    else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
+setUser authToken x = do
+    isAuthorized <- verifyAdminhood authToken
+    if not isAuthorized
+      then pure False
+      else case x of
+        SetUserDelete User{userId} -> do
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            delete userId
+            pure True
+        SetUserUpdate{setUserUpdateUser = User{..}, setUserUpdateNewPassword} -> do
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
 
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
-        update userId $
-          [ StoredUserCreated =. userCreated
-          , StoredUserEmail =. userEmail
-          , StoredUserConfirmed =. userEmailConfirmed
-          ] ++ case setUserNewPassword of
-                 Nothing -> []
-                 Just newPassword ->
-                   [StoredUserPassword =. newPassword]
-        case userSocialLogin of
-          SocialLoginForm mFb -> do
-            case mFb of
-              Nothing -> deleteBy (FacebookUserDetailsOwner userId)
-              Just userFb -> insert_ (FacebookUserDetails userFb userId)
-        xs <- selectList [UserRoleStoredUserRoleOwner ==. userId] []
-        rolesRef <- liftIO (newIORef (Set.fromList userRoles))
-        forM_ xs $ \(Entity k (UserRoleStored role _)) -> do
-          roles' <- liftIO (readIORef rolesRef)
-          if Set.member role roles'
-            then liftIO $ modifyIORef rolesRef $ Set.delete role
-            else delete k
-        rolesLeft <- liftIO (readIORef rolesRef)
-        forM_ rolesLeft $ \role -> insert_ (UserRoleStored role userId)
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            update userId $
+              [ StoredUserCreated =. userCreated
+              , StoredUserEmail =. userEmail
+              , StoredUserConfirmed =. userEmailConfirmed
+              ] ++ case setUserUpdateNewPassword of
+                    Nothing -> []
+                    Just newPassword ->
+                      [StoredUserPassword =. newPassword]
+            case userSocialLogin of
+              SocialLoginForm mFb -> do
+                case mFb of
+                  Nothing -> deleteBy (FacebookUserDetailsOwner userId)
+                  Just userFb -> insert_ (FacebookUserDetails userFb userId)
+            xs <- selectList [UserRoleStoredUserRoleOwner ==. userId] []
+            rolesRef <- liftIO (newIORef (Set.fromList userRoles))
+            forM_ xs $ \(Entity k (UserRoleStored role _)) -> do
+              roles' <- liftIO (readIORef rolesRef)
+              if Set.member role roles'
+                then liftIO $ modifyIORef rolesRef $ Set.delete role
+                else delete k
+            rolesLeft <- liftIO (readIORef rolesRef)
+            forM_ rolesLeft $ \role -> insert_ (UserRoleStored role userId)
 
-        pure True
+            pure True
 
 
 
