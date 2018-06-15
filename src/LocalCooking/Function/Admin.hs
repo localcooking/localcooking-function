@@ -5,13 +5,14 @@
 
 module LocalCooking.Function.Admin where
 
-import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..), Register (..))
+import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..))
+import LocalCooking.Semantics.Admin (SetUser (..), NewUser (..))
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
 import LocalCooking.Database.Schema.User
   ( StoredUser (..)
   , EntityField
-    (StoredUserEmail, StoredUserCreated, StoredUserConfirmed)
+    (StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword)
   , Unique (UniqueEmail))
 import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -57,8 +58,8 @@ getUsers authToken = do
 
 
 
-setUser :: AuthToken -> User -> SystemM Bool
-setUser authToken User{..} = do
+setUser :: AuthToken -> SetUser -> SystemM Bool
+setUser authToken SetUser{setUserUser = User{..}, setUserNewPassword} = do
   isAuthorized <- verifyAdminhood authToken
   if not isAuthorized
     then pure False
@@ -66,11 +67,14 @@ setUser authToken User{..} = do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
 
       liftIO $ flip runSqlPool systemEnvDatabase $ do
-        update userId
+        update userId $
           [ StoredUserCreated =. userCreated
           , StoredUserEmail =. userEmail
           , StoredUserConfirmed =. userEmailConfirmed
-          ]
+          ] ++ case setUserNewPassword of
+                 Nothing -> []
+                 Just newPassword ->
+                   [StoredUserPassword =. newPassword]
         case userSocialLogin of
           SocialLoginForm mFb -> do
             case mFb of
@@ -90,8 +94,8 @@ setUser authToken User{..} = do
 
 
 
-addUser :: AuthToken -> Register -> SystemM Bool
-addUser authToken Register{..} = do
+addUser :: AuthToken -> NewUser -> SystemM Bool
+addUser authToken NewUser{..} = do
   isAuthorized <- verifyAdminhood authToken
   if not isAuthorized
     then pure False
@@ -99,17 +103,12 @@ addUser authToken Register{..} = do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
 
       liftIO $ flip runSqlPool systemEnvDatabase $ do
-        mEnt <- getBy (UniqueEmail registerEmail)
+        mEnt <- getBy (UniqueEmail newUserEmail)
         case mEnt of
           Just _ -> pure False
           Nothing -> do
             now <- liftIO getCurrentTime
-            k <- insert (StoredUser now registerEmail registerPassword False)
-            case registerSocial of
-              SocialLoginForm mFb -> do
-                case mFb of
-                  Nothing -> pure ()
-                  Just userFb -> insert_ (FacebookUserDetails userFb k)
+            k <- insert (StoredUser now newUserEmail newUserPassword False)
             pure True
 
 
