@@ -8,7 +8,7 @@
 module LocalCooking.Function.Mitch where
 
 import LocalCooking.Semantics.Mitch
-  ( Customer (..)
+  ( Customer (..), Diets (..), Allergies (..)
   , Review (..)
   , Chef (..), ChefSynopsis (..)
   , MenuSynopsis (..), Menu (..)
@@ -86,24 +86,24 @@ setCustomer authToken Customer{..} = do
     Nothing -> pure False
     Just userId -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
-      mCust <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
         mCustEnt <- getBy (UniqueCustomer userId)
         case mCustEnt of
           Nothing -> do
-            custId <- insert (StoredCustomer userId customerName customerAddress)
-            pure (Just custId)
+            insert_ (StoredCustomer userId customerName customerAddress)
+            pure True
           Just (Entity custId _) -> do
             update custId
               [ StoredCustomerStoredCustomerName =. customerName
               , StoredCustomerStoredCustomerAddress =. customerAddress
               ]
-            pure (Just custId)
-      case mCust of
-        Nothing -> pure False
-        Just custId -> liftIO $ do
-          assignDiets systemEnvDatabase custId customerDiets
-          assignAllergies systemEnvDatabase custId customerAllergies
-          pure True
+            pure True
+      -- case mCust of
+      --   Nothing -> pure False
+      --   Just custId -> liftIO $ do
+      --     assignDiets systemEnvDatabase custId customerDiets
+      --     assignAllergies systemEnvDatabase custId customerAllergies
+      --     pure True
 
 
 getCustomer :: AuthToken -> SystemM (Maybe Customer)
@@ -118,19 +118,103 @@ getCustomer authToken = do
         case mCustEnt of
           Nothing -> pure Nothing
           Just (Entity custId (StoredCustomer _ name address)) -> do
+            -- mDiets <- liftIO $ getCustDiets systemEnvDatabase custId
+            -- case mDiets of
+            --   Nothing -> pure Nothing
+            --   Just diets -> do
+            --     mAllergies <- liftIO $ getCustAllergies systemEnvDatabase custId
+            --     case mAllergies of
+            --       Nothing -> pure Nothing
+            --       Just allergies ->
+            pure $ Just $ Customer
+              name
+              address
+              -- diets
+              -- allergies
+
+
+setDiets :: AuthToken -> Diets -> SystemM Bool
+setDiets authToken (Diets ds) = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      mCust <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mCustEnt <- getBy (UniqueCustomer userId)
+        case mCustEnt of
+          Nothing -> pure Nothing
+          Just (Entity custId _) -> pure (Just custId)
+      case mCust of
+        Nothing -> pure False
+        Just custId -> liftIO $ do
+          assignDiets systemEnvDatabase custId ds
+          pure True
+
+
+getDiets :: AuthToken -> SystemM (Maybe Diets)
+getDiets authToken = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mCustEnt <- getBy (UniqueCustomer userId)
+        case mCustEnt of
+          Nothing -> pure Nothing
+          Just (Entity custId _) -> do
             mDiets <- liftIO $ getCustDiets systemEnvDatabase custId
             case mDiets of
               Nothing -> pure Nothing
-              Just diets -> do
-                mAllergies <- liftIO $ getCustAllergies systemEnvDatabase custId
-                case mAllergies of
-                  Nothing -> pure Nothing
-                  Just allergies ->
-                    pure $ Just $ Customer
-                      name
-                      address
-                      diets
-                      allergies
+              Just diets -> pure $ Just $ Diets diets
+            --     mAllergies <- liftIO $ getCustAllergies systemEnvDatabase custId
+            --     case mAllergies of
+            --       Nothing -> pure Nothing
+            --       Just allergies ->
+            -- pure $ Just $ Customer
+            --   name
+            --   address
+              -- diets
+              -- allergies
+
+
+setAllergies :: AuthToken -> Allergies -> SystemM Bool
+setAllergies authToken (Allergies as) = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      mCust <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mCustEnt <- getBy (UniqueCustomer userId)
+        case mCustEnt of
+          Nothing -> pure Nothing
+          Just (Entity custId _) -> pure (Just custId)
+      case mCust of
+        Nothing -> pure False
+        Just custId -> liftIO $ do
+          assignAllergies systemEnvDatabase custId as
+          pure True
+
+
+getAllergies :: AuthToken -> SystemM (Maybe Allergies)
+getAllergies authToken = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mCustEnt <- getBy (UniqueCustomer userId)
+        case mCustEnt of
+          Nothing -> pure Nothing
+          Just (Entity custId _) -> do
+            mAllergies <- liftIO $ getCustAllergies systemEnvDatabase custId
+            case mAllergies of
+              Nothing -> pure Nothing
+              Just allergies -> pure $ Just $ Allergies allergies
+
 
 
 submitReview :: AuthToken -> StoredOrderId -> Rating -> Text
