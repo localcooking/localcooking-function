@@ -5,9 +5,9 @@
   , OverloadedStrings
   #-}
 
-module LocalCooking.Function.Farm where
+module LocalCooking.Function.Restaurant where
 
-import LocalCooking.Semantics.Farm ()
+import LocalCooking.Semantics.Restaurant ()
 import LocalCooking.Function.Semantics ()
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
