@@ -7,7 +7,7 @@
 
 module LocalCooking.Function.Content where
 
-import LocalCooking.Semantics.Content (EditorSettings (..))
+import LocalCooking.Semantics.Content (SetEditor (..), GetEditor (..))
 import LocalCooking.Function.Semantics ()
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -15,7 +15,19 @@ import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema.User.Editor
-  ( StoredEditor (..), Unique (UniqueEditor))
+  ( StoredEditor (..), Unique (UniqueEditor)
+  , EntityField
+    ( StoredEditorStoredEditorName
+    )
+  )
+import LocalCooking.Database.Schema.Content
+  ( EntityField
+    ( RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor
+    , RecordSubmissionApprovalRecordSubmissionApprovalEditor
+    )
+  , RecordAssignedSubmissionPolicy (..)
+  , RecordSubmissionPolicy (..)
+  )
 -- import LocalCooking.Database.Schema.Semantics
 --   ( StoredChef (..), StoredMenu (..), StoredMeal (..)
 --   , StoredChefId, StoredMenuId, StoredMealId
@@ -53,8 +65,8 @@ import Database.Persist.Class (selectList, getBy, insert, insert_, update, get)
 
 
 
-setEditor :: AuthToken -> EditorSettings -> SystemM Bool
-setEditor authToken EditorSettings{..} = do
+setEditor :: AuthToken -> SetEditor -> SystemM Bool
+setEditor authToken SetEditor{..} = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
@@ -64,7 +76,32 @@ setEditor authToken EditorSettings{..} = do
         mCustEnt <- getBy (UniqueEditor userId)
         case mCustEnt of
           Nothing -> do
-            insert_ (StoredEditor userId)
-            pure True
-          Just _ ->
-            pure True
+            insert_ (StoredEditor userId setEditorName)
+          Just (Entity editorId _) ->
+            update editorId [StoredEditorStoredEditorName =. setEditorName]
+        pure True
+
+
+getEditor :: AuthToken -> SystemM (Maybe GetEditor)
+getEditor authToken = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mCustEnt <- getBy (UniqueEditor userId)
+        case mCustEnt of
+          Nothing -> pure Nothing
+          Just (Entity editorId (StoredEditor _ name)) -> do
+            variants <- do
+              xs <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor ==. editorId] []
+              fmap catMaybes $ forM xs $ \(Entity _ (RecordAssignedSubmissionPolicy policyId _)) -> do
+                mPolicy <- get policyId
+                case mPolicy of
+                  Nothing -> pure Nothing
+                  Just (RecordSubmissionPolicy v _) -> pure (Just v)
+            approved <- do
+              xs <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalEditor ==. editorId] []
+              forM xs $ \(Entity approvalId _) -> pure approvalId
+            pure $ Just $ GetEditor name variants approved

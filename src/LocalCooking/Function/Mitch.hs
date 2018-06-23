@@ -8,7 +8,7 @@
 module LocalCooking.Function.Mitch where
 
 import LocalCooking.Semantics.Mitch
-  ( CustomerSettings (..), Diets (..), Allergies (..)
+  ( GetSetCustomer (..), Diets (..), Allergies (..)
   , Review (..)
   , Chef (..), ChefSynopsis (..)
   , MenuSynopsis (..), Menu (..)
@@ -79,8 +79,8 @@ import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, 
 
 
 
-setCustomerSettings :: AuthToken -> CustomerSettings -> SystemM Bool
-setCustomerSettings authToken CustomerSettings{..} = do
+setGetSetCustomer :: AuthToken -> GetSetCustomer -> SystemM Bool
+setGetSetCustomer authToken GetSetCustomer{..} = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
@@ -90,18 +90,18 @@ setCustomerSettings authToken CustomerSettings{..} = do
         mCustEnt <- getBy (UniqueCustomer userId)
         case mCustEnt of
           Nothing -> do
-            insert_ (StoredCustomer userId customerSettingsName customerSettingsAddress)
+            insert_ (StoredCustomer userId getSetCustomerName getSetCustomerAddress)
             pure True
           Just (Entity custId _) -> do
             update custId
-              [ StoredCustomerStoredCustomerName =. customerSettingsName
-              , StoredCustomerStoredCustomerAddress =. customerSettingsAddress
+              [ StoredCustomerStoredCustomerName =. getSetCustomerName
+              , StoredCustomerStoredCustomerAddress =. getSetCustomerAddress
               ]
             pure True
 
 
-getCustomerSettings :: AuthToken -> SystemM (Maybe CustomerSettings)
-getCustomerSettings authToken = do
+getGetSetCustomer :: AuthToken -> SystemM (Maybe GetSetCustomer)
+getGetSetCustomer authToken = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing
@@ -112,7 +112,7 @@ getCustomerSettings authToken = do
         case mCustEnt of
           Nothing -> pure Nothing
           Just (Entity custId (StoredCustomer _ name address)) ->
-            pure $ Just $ CustomerSettings
+            pure $ Just $ GetSetCustomer
               name
               address
 
@@ -152,15 +152,6 @@ getDiets authToken = do
             case mDiets of
               Nothing -> pure Nothing
               Just diets -> pure $ Just $ Diets diets
-            --     mAllergies <- liftIO $ getCustAllergies systemEnvDatabase custId
-            --     case mAllergies of
-            --       Nothing -> pure Nothing
-            --       Just allergies ->
-            -- pure $ Just $ CustomerSettings
-            --   name
-            --   address
-              -- diets
-              -- allergies
 
 
 setAllergies :: AuthToken -> Allergies -> SystemM Bool

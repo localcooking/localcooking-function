@@ -8,7 +8,7 @@
 module LocalCooking.Function.Chef where
 
 import LocalCooking.Semantics.Chef
-  ( ChefSettings (..), MenuSettings (..), MealSettings (..)
+  ( GetSetChef (..), MenuSettings (..), MealSettings (..)
   )
 import LocalCooking.Function.Semantics
   ( getChefTags, getMealTags, getMenuTags, getMealIngredientsDiets
@@ -85,7 +85,7 @@ addChefTag authToken tag = do
 
 
 
-getChef :: AuthToken -> SystemM (Maybe ChefSettings)
+getChef :: AuthToken -> SystemM (Maybe GetSetChef)
 getChef authToken = do
   mChef <- getChefFromAuthToken authToken
   case mChef of
@@ -97,19 +97,19 @@ getChef authToken = do
         case mTags of
           Nothing -> pure Nothing
           Just tags ->
-            pure $ Just ChefSettings
-              { chefSettingsName = name
-              , chefSettingsPermalink = permalink
-              , chefSettingsImages = images
-              , chefSettingsAvatar = avatar
-              , chefSettingsBio = bio
-              , chefSettingsTags = tags
+            pure $ Just GetSetChef
+              { getSetChefName = name
+              , getSetChefPermalink = permalink
+              , getSetChefImages = images
+              , getSetChefAvatar = avatar
+              , getSetChefBio = bio
+              , getSetChefTags = tags
               }
 
 
 
-setChef :: AuthToken -> ChefSettings -> SystemM (Maybe StoredChefId)
-setChef authToken ChefSettings{..} = do
+setChef :: AuthToken -> GetSetChef -> SystemM (Maybe StoredChefId)
+setChef authToken GetSetChef{..} = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   mUserId <- getUserId authToken
   case mUserId of
@@ -120,12 +120,12 @@ setChef authToken ChefSettings{..} = do
         Nothing -> liftIO $ flip runSqlPool systemEnvDatabase $ do
           chefId <- insert $ StoredChef
             userId
-            chefSettingsName
-            chefSettingsPermalink
-            chefSettingsBio
-            chefSettingsImages
-            chefSettingsAvatar
-          forM_ chefSettingsTags $ \t -> do
+            getSetChefName
+            getSetChefPermalink
+            getSetChefBio
+            getSetChefImages
+            getSetChefAvatar
+          forM_ getSetChefTags $ \t -> do
             mChefTagId <- liftIO (getChefTagId systemEnvDatabase t)
             case mChefTagId of
               Nothing -> pure ()
@@ -133,13 +133,13 @@ setChef authToken ChefSettings{..} = do
           pure (Just chefId)
         Just (WithId chefId _) -> do
           flip runSqlPool systemEnvDatabase $ update chefId
-            [ StoredChefStoredChefName =. chefSettingsName
-            , StoredChefStoredChefPermalink =. chefSettingsPermalink
-            , StoredChefStoredChefBio =. chefSettingsBio
-            , StoredChefStoredChefImages =. chefSettingsImages
-            , StoredChefStoredChefAvatar =. chefSettingsAvatar
+            [ StoredChefStoredChefName =. getSetChefName
+            , StoredChefStoredChefPermalink =. getSetChefPermalink
+            , StoredChefStoredChefBio =. getSetChefBio
+            , StoredChefStoredChefImages =. getSetChefImages
+            , StoredChefStoredChefAvatar =. getSetChefAvatar
             ]
-          liftIO $ assignChefTags systemEnvDatabase chefId chefSettingsTags
+          liftIO $ assignChefTags systemEnvDatabase chefId getSetChefTags
           pure (Just chefId)
 
 
