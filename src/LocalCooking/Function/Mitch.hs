@@ -79,8 +79,8 @@ import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, 
 
 
 
-setGetSetCustomer :: AuthToken -> GetSetCustomer -> SystemM Bool
-setGetSetCustomer authToken GetSetCustomer{..} = do
+setCustomer :: AuthToken -> GetSetCustomer -> SystemM Bool
+setCustomer authToken GetSetCustomer{..} = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
@@ -100,8 +100,8 @@ setGetSetCustomer authToken GetSetCustomer{..} = do
             pure True
 
 
-getGetSetCustomer :: AuthToken -> SystemM (Maybe GetSetCustomer)
-getGetSetCustomer authToken = do
+getCustomer :: AuthToken -> SystemM (Maybe GetSetCustomer)
+getCustomer authToken = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing
