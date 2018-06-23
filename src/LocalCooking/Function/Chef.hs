@@ -42,7 +42,7 @@ import LocalCooking.Database.Schema.Semantics
 import LocalCooking.Database.Query.Semantics.Admin (hasRole)
 import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId)
 import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId)
-import LocalCooking.Database.Query.IngredientDiet (getStoredIngredientId)
+import LocalCooking.Database.Query.IngredientDiet (getStoredIngredientTagId)
 
 import Data.Maybe (catMaybes)
 import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))
@@ -299,7 +299,7 @@ newMeal authToken (WithId menuId MealSettings{..}) = do
               mealSettingsImages
               mealSettingsPrice
             forM_ mealSettingsIngredients $ \ingName -> do
-              mIngId <- liftIO (getStoredIngredientId systemEnvDatabase ingName)
+              mIngId <- liftIO (getStoredIngredientTagId systemEnvDatabase ingName)
               case mIngId of
                 Nothing -> pure ()
                 Just ingId -> insert_ (MealIngredient mealId ingId)

@@ -7,12 +7,12 @@ module LocalCooking.Function.Semantics where
 
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
-import LocalCooking.Common.Ingredient (IngredientName)
-import LocalCooking.Common.Diet (Diet)
+import LocalCooking.Common.Tag.Ingredient (IngredientTag)
+import LocalCooking.Common.Tag.Diet (DietTag)
 import LocalCooking.Database.Query.IngredientDiet
   ( getDietId, getDiets, getDietById
-  , getStoredIngredientId, getIngredientViolations
-  , getIngredientNameById)
+  , getStoredIngredientTagId, getIngredientViolations
+  , getIngredientTagById)
 import LocalCooking.Database.Query.Tag.Chef (getChefTagById, getChefTagId)
 import LocalCooking.Database.Query.Tag.Meal (getMealTagById, getMealTagId)
 import LocalCooking.Database.Schema.User.Customer
@@ -49,7 +49,7 @@ import Database.Persist.Class (selectList, get, insert_, deleteBy, deleteWhere)
 
 
 -- | Returns the set of non-violated diets, and used ingredients per diet
-getMealIngredientsDiets :: ConnectionPool -> StoredMealId -> IO (Maybe ([IngredientName],[Diet]))
+getMealIngredientsDiets :: ConnectionPool -> StoredMealId -> IO (Maybe ([IngredientTag],[DietTag]))
 getMealIngredientsDiets systemEnvDatabase mealId =
   flip runSqlPool systemEnvDatabase $ do
     mMeal <- get mealId
@@ -58,9 +58,9 @@ getMealIngredientsDiets systemEnvDatabase mealId =
       Just _ -> do
         xs <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
         ( ings
-          , ds :: [Set.Set Diet]
+          , ds :: [Set.Set DietTag]
           ) <- fmap (unzip . catMaybes) $ forM xs $ \(Entity _ (MealIngredient _ ingId)) -> liftIO $ do
-          mIng <- liftIO (getIngredientNameById systemEnvDatabase ingId)
+          mIng <- liftIO (getIngredientTagById systemEnvDatabase ingId)
           case mIng of
             Nothing -> pure Nothing
             Just ing -> do
@@ -162,13 +162,13 @@ assignMealTags systemEnvDatabase mealId mealSettingsTags =
 
 
 
-assignMealIngredients :: ConnectionPool -> StoredMealId -> [IngredientName] -> IO ()
+assignMealIngredients :: ConnectionPool -> StoredMealId -> [IngredientTag] -> IO ()
 assignMealIngredients systemEnvDatabase mealId mealSettingsIngredients =
   flip runSqlPool systemEnvDatabase $ do
     oldIngs <- fmap (fmap (\(Entity _ (MealIngredient _ t)) -> t))
               $ selectList [MealIngredientMealIngredientMeal ==. mealId] []
     newIngs <- fmap catMaybes $ forM mealSettingsIngredients $ \t ->
-                liftIO (getStoredIngredientId systemEnvDatabase t)
+                liftIO (getStoredIngredientTagId systemEnvDatabase t)
 
     let toRemove = Set.fromList oldIngs `Set.difference` Set.fromList newIngs
         toAdd = Set.fromList newIngs `Set.difference` Set.fromList oldIngs
@@ -179,7 +179,7 @@ assignMealIngredients systemEnvDatabase mealId mealSettingsIngredients =
       insert_ (MealIngredient mealId t)
 
 
-assignDiets :: ConnectionPool -> StoredCustomerId -> [Diet] -> IO ()
+assignDiets :: ConnectionPool -> StoredCustomerId -> [DietTag] -> IO ()
 assignDiets systemEnvDatabase custId customerDiets =
   flip runSqlPool systemEnvDatabase $ do
     oldDiets <- fmap (fmap (\(Entity _ (StoredDietPreference _ d)) -> d))
@@ -194,7 +194,7 @@ assignDiets systemEnvDatabase custId customerDiets =
       insert_ (StoredDietPreference custId d)
 
 
-getCustDiets :: ConnectionPool -> StoredCustomerId -> IO (Maybe [Diet])
+getCustDiets :: ConnectionPool -> StoredCustomerId -> IO (Maybe [DietTag])
 getCustDiets systemEnvDatabase custId =
   flip runSqlPool systemEnvDatabase $ do
     mCust <- get custId
@@ -207,13 +207,13 @@ getCustDiets systemEnvDatabase custId =
 
 
 
-assignAllergies :: ConnectionPool -> StoredCustomerId -> [IngredientName] -> IO ()
+assignAllergies :: ConnectionPool -> StoredCustomerId -> [IngredientTag] -> IO ()
 assignAllergies systemEnvDatabase custId customerAllergies =
   flip runSqlPool systemEnvDatabase $ do
     oldAllergys <- fmap (fmap (\(Entity _ (StoredAllergy _ d)) -> d))
                 $ selectList [StoredAllergyAllergyOwner ==. custId] []
     newAllergys <- fmap catMaybes $ forM customerAllergies $ \i ->
-                  liftIO (getStoredIngredientId systemEnvDatabase i)
+                  liftIO (getStoredIngredientTagId systemEnvDatabase i)
     let toRemove = Set.fromList oldAllergys `Set.difference` Set.fromList newAllergys
         toAdd = Set.fromList newAllergys `Set.difference` Set.fromList oldAllergys
     forM_ toRemove $ \i -> deleteWhere
@@ -223,7 +223,7 @@ assignAllergies systemEnvDatabase custId customerAllergies =
     forM_ toAdd $ \i -> insert_ (StoredAllergy custId i)
 
 
-getCustAllergies :: ConnectionPool -> StoredCustomerId -> IO (Maybe [IngredientName])
+getCustAllergies :: ConnectionPool -> StoredCustomerId -> IO (Maybe [IngredientTag])
 getCustAllergies systemEnvDatabase custId =
   flip runSqlPool systemEnvDatabase $ do
     mCust <- get custId
@@ -232,4 +232,4 @@ getCustAllergies systemEnvDatabase custId =
       Just _ -> do
         ds <- fmap (fmap (\(Entity _ (StoredAllergy _ a)) -> a))
             $ selectList [StoredAllergyAllergyOwner ==. custId] []
-        fmap (Just . catMaybes) $ forM ds $ liftIO . getIngredientNameById systemEnvDatabase
+        fmap (Just . catMaybes) $ forM ds $ liftIO . getIngredientTagById systemEnvDatabase

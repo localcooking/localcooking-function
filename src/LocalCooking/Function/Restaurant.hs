@@ -34,10 +34,6 @@ import LocalCooking.Database.Schema.Semantics
   , Unique
     ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline)
   )
-import LocalCooking.Database.Query.Semantics.Admin (hasRole)
-import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId)
-import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId)
-import LocalCooking.Database.Query.IngredientDiet (getStoredIngredientId)
 
 import Data.Maybe (catMaybes)
 import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))
