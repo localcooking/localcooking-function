@@ -114,7 +114,7 @@ addUser authToken NewUser{..} = do
           Just _ -> pure False
           Nothing -> do
             now <- liftIO getCurrentTime
-            k <- insert (StoredUser now newUserEmail newUserPassword False)
+            insert_ (StoredUser now newUserEmail newUserPassword False)
             pure True
 
 

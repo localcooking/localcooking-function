@@ -17,7 +17,7 @@ import qualified Data.Text as T
 import qualified Data.XML.Types as XML
 import Text.XML.Stream.Render (renderBuilder)
 import Data.Binary.Builder (Builder)
-import Data.Conduit (ConduitT, ($=), yield, ($$))
+import Data.Conduit (ConduitT, (.|), yield, ($$))
 import qualified Data.Conduit.List as CL
 import Control.Monad (mapM_)
 import Control.Monad.IO.Class (liftIO)
@@ -40,14 +40,14 @@ sphinxDocumentHTTPStream doc backend chunk flush =
     runner :: ConduitT Builder o (ReaderT SqlBackend (ResourceT IO)) ()
     runner = CL.foldMapM (\x -> liftIO $ chunk x >> flush)
     stream :: ConduitT () Builder (ReaderT SqlBackend (ResourceT IO)) ()
-    stream = doc $= renderBuilder def
+    stream = doc .| renderBuilder def
 
 
 mealTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
 mealTagsDocument = do
   mapM_ yield startEvents
   selectSource [] []
-    $= CL.concatMap
+    .| CL.concatMap
          ( extractEntityToXMLEvent
            (\(StoredMealTag (MealTag (Tag x))) -> x)
          )
@@ -58,7 +58,7 @@ chefTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
 chefTagsDocument = do
   mapM_ yield startEvents
   selectSource [] []
-    $= CL.concatMap
+    .| CL.concatMap
          ( extractEntityToXMLEvent
            (\(StoredChefTag (ChefTag (Tag x))) -> x)
          )

@@ -91,6 +91,6 @@ expireThread expiration AccessTokenContext{..} = forever $ do
   forM_ xs $ \(authToken,_) ->
     atomically (TMapMVar.insert accessTokenContextExpire authToken ())
   threadDelay $
-    let second = 10 ^ 6
+    let second = 10 ^ (6 :: Int)
         minute = second * 60
     in  minute

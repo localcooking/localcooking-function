@@ -28,29 +28,6 @@ import LocalCooking.Database.Schema.Content
   , RecordAssignedSubmissionPolicy (..)
   , RecordSubmissionPolicy (..)
   )
--- import LocalCooking.Database.Schema.Semantics
---   ( StoredChef (..), StoredMenu (..), StoredMeal (..)
---   , StoredChefId, StoredMenuId, StoredMealId
---   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
---   , MealIngredient (..)
---   , EntityField
---     ( StoredChefStoredChefName, StoredChefStoredChefPermalink
---     , StoredChefStoredChefImages, StoredChefStoredChefAvatar
---     , StoredChefStoredChefBio
---     , StoredMenuStoredMenuAuthor, StoredMenuStoredMenuPublished
---     , StoredMenuStoredMenuDeadline, StoredMenuStoredMenuDescription
---     , StoredMenuStoredMenuHeading, StoredMenuStoredMenuImages
---     , StoredMealStoredMealMenu, StoredMealStoredMealDescription
---     , StoredMealStoredMealHeading, StoredMealStoredMealImages
---     , StoredMealStoredMealInstructions, StoredMealStoredMealPermalink
---     , StoredMealStoredMealPrice, StoredMealStoredMealTitle
---     )
---   , Unique
---     ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline)
---   )
-import LocalCooking.Database.Query.Semantics.Admin (hasRole)
-import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId)
-import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId)
 
 import Data.Maybe (catMaybes)
 import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))

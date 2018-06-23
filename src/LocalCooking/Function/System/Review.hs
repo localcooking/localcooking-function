@@ -68,7 +68,7 @@ calculateThread db ReviewAccumulator{..} = forever $ do
       liftIO $ atomically $ modifyTVar reviewAccumMeals $ HashMap.insert mealId totalRating
 
   threadDelay $
-    let second = 10 ^ 6
+    let second = 10 ^ (6 :: Int)
         minute = second * 60
     in  10 * minute
 

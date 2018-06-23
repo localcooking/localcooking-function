@@ -111,7 +111,7 @@ getCustomer authToken = do
         mCustEnt <- getBy (UniqueCustomer userId)
         case mCustEnt of
           Nothing -> pure Nothing
-          Just (Entity custId (StoredCustomer _ name address)) ->
+          Just (Entity _ (StoredCustomer _ name address)) ->
             pure $ Just $ GetSetCustomer
               name
               address
