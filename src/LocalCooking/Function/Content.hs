@@ -13,6 +13,7 @@ import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRo
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
+import LocalCooking.Common.ContentRecord (ContentRecord)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema.User.Editor
   ( StoredEditor (..), Unique (UniqueEditor)
@@ -27,11 +28,13 @@ import LocalCooking.Database.Schema.Content
     )
   , RecordAssignedSubmissionPolicy (..)
   , RecordSubmissionPolicy (..)
+  , StoredRecordSubmission (..)
   )
 
 import Data.Maybe (catMaybes)
 import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))
 import Data.Aeson.Types (typeMismatch)
+import Data.Time (getCurrentTime)
 import GHC.Generics (Generic)
 import Control.Monad (forM_, forM)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -82,3 +85,16 @@ getEditor authToken = do
               xs <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalEditor ==. editorId] []
               forM xs $ \(Entity approvalId _) -> pure approvalId
             pure $ Just $ GetEditor name variants approved
+
+
+submitRecord :: AuthToken -> ContentRecord -> SystemM Bool
+submitRecord authToken record = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        now <- liftIO getCurrentTime
+        insert_ (StoredRecordSubmission userId now record)
+        pure True
