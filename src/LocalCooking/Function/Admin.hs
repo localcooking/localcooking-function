@@ -6,7 +6,7 @@
 module LocalCooking.Function.Admin where
 
 import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..))
-import LocalCooking.Semantics.Admin (SetUser (..), NewUser (..))
+import LocalCooking.Semantics.Admin (SetUser (..), NewUser (..), GetSetSubmissionPolicy (..))
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
 import LocalCooking.Database.Schema.User
@@ -15,8 +15,23 @@ import LocalCooking.Database.Schema.User
     (StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword)
   , Unique (UniqueEmail))
 import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
+import LocalCooking.Database.Schema.Content
+  ( EntityField
+    ( RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor
+    , RecordSubmissionApprovalRecordSubmissionApprovalEditor
+    , RecordSubmissionPolicyRecordSubmissionPolicyAdditional
+    , RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy
+    )
+  , Unique
+    ( UniqueSubmissionPolicyVariant
+    )
+  , RecordAssignedSubmissionPolicy (..)
+  , RecordSubmissionPolicy (..)
+  , StoredRecordSubmission (..)
+  )
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Admin))
+import LocalCooking.Common.ContentRecord (ContentRecordVariant)
 
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set
@@ -125,3 +140,43 @@ verifyAdminhood authToken = do
   case mUserId of
     Nothing -> pure False
     Just userId -> guardRole userId Admin
+
+
+
+getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe GetSetSubmissionPolicy)
+getSubmissionPolicy authToken variant = do
+  isAdmin <- verifyAdminhood authToken
+  if not isAdmin
+    then pure Nothing
+    else do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mEnt <- getBy (UniqueSubmissionPolicyVariant variant)
+        case mEnt of
+          Nothing -> pure Nothing
+          Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
+            assigned <- do
+              xs <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
+              pure $ (\(Entity _ (RecordAssignedSubmissionPolicy _ entityId)) -> entityId) <$> xs
+            pure $ Just $ GetSetSubmissionPolicy variant additional assigned
+
+
+
+setSubmissionPolicy :: AuthToken -> GetSetSubmissionPolicy -> SystemM Bool
+setSubmissionPolicy authToken (GetSetSubmissionPolicy variant additional assigned) = do
+  isAdmin <- verifyAdminhood authToken
+  if not isAdmin
+    then pure False
+    else do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mEnt <- getBy (UniqueSubmissionPolicyVariant variant)
+        policyId <- case mEnt of
+          Just (Entity p _) -> do
+            update p [RecordSubmissionPolicyRecordSubmissionPolicyAdditional =. additional]
+            pure p
+          Nothing -> do
+            insert (RecordSubmissionPolicy variant additional)
+        forM_ assigned $ \editorId -> do
+          insert_ (RecordAssignedSubmissionPolicy policyId editorId)
+        pure True
