@@ -65,10 +65,6 @@ import Data.IORef (newIORef, readIORef, modifyIORef)
 import Data.Image.Source (ImageSource)
 import Data.Time (getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
-import Text.Search.Sphinx (query, defaultConfig)
-import Text.Search.Sphinx.Types
-  (MatchMode (Any), Result (Ok), QueryResult (matches), Match (documentId))
-import Text.Search.Sphinx.Configuration (Configuration (mode, port, limit))
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Logging (log')
@@ -576,47 +572,3 @@ getOrders authToken = do
                   , orderTime = time
                   , orderVolume = vol
                   }
-
-
-searchMealTags :: Text -> SystemM (Maybe [MealTag])
-searchMealTags term = do
-  xs' <- liftIO (query config "mealtags" term)
-  case xs' of
-    Ok xs -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      let ks = (toSqlKey . documentId) <$> matches xs
-      flip runSqlPool systemEnvDatabase $
-        fmap (Just . catMaybes) $ forM ks $ \k -> do
-          mX <- get k
-          pure ((\(StoredMealTag x) -> x) <$> mX)
-    e -> do
-      log' $ "Sphinx error: " <> T.pack (show e)
-      pure Nothing
-  where
-    config = defaultConfig
-      { port = 9312
-      , mode = Any
-      , limit = 10
-      }
-
-
-searchChefTags :: Text -> SystemM (Maybe [ChefTag])
-searchChefTags term = do
-  xs' <- liftIO (query config "cheftags" term)
-  case xs' of
-    Ok xs -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      let ks = (toSqlKey . documentId) <$> matches xs
-      flip runSqlPool systemEnvDatabase $
-        fmap (Just . catMaybes) $ forM ks $ \k -> do
-          mX <- get k
-          pure ((\(StoredChefTag x) -> x) <$> mX)
-    e -> do
-      log' $ "Sphinx error: " <> T.pack (show e)
-      pure Nothing
-  where
-    config = defaultConfig
-      { port = 9312
-      , mode = Any
-      , limit = 10
-      }

@@ -7,16 +7,17 @@
 
 module LocalCooking.Function.Content where
 
-import LocalCooking.Semantics.Content (SetEditor (..), GetEditor (..))
-import LocalCooking.Function.Semantics ()
+import LocalCooking.Function.Tag (unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag, unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag)
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+import LocalCooking.Semantics.Content (SetEditor (..), GetEditor (..))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
-import LocalCooking.Common.ContentRecord (ContentRecord)
-import LocalCooking.Common.User.Role (UserRole (Chef))
+import LocalCooking.Common.ContentRecord
+  (ContentRecord (TagRecord), TagRecord (..), contentRecordVariant, ContentRecordVariant)
+import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema.User.Editor
-  ( StoredEditor (..), Unique (UniqueEditor)
+  ( StoredEditor (..), StoredEditorId, Unique (UniqueEditor)
   , EntityField
     ( StoredEditorStoredEditorName
     )
@@ -24,23 +25,33 @@ import LocalCooking.Database.Schema.User.Editor
 import LocalCooking.Database.Schema.Content
   ( EntityField
     ( RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor
+    , RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy
     , RecordSubmissionApprovalRecordSubmissionApprovalEditor
+    , RecordSubmissionApprovalRecordSubmissionApprovalRecord
+    )
+  , Unique
+    ( UniqueSubmissionPolicyVariant
     )
   , RecordAssignedSubmissionPolicy (..)
   , RecordSubmissionPolicy (..)
-  , StoredRecordSubmission (..)
+  , StoredRecordSubmission (..), StoredRecordSubmissionId
+  , RecordSubmissionApproval (..)
   )
 
 import Data.Maybe (catMaybes)
 import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))
 import Data.Aeson.Types (typeMismatch)
 import Data.Time (getCurrentTime)
+import qualified Data.Set as Set
+import qualified Data.Text as T
+import Data.Monoid ((<>))
 import GHC.Generics (Generic)
-import Control.Monad (forM_, forM)
+import Control.Monad (forM_, forM, void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Logging (warn')
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, getBy, insert, insert_, update, get)
+import Database.Persist.Class (selectList, getBy, insert, insert_, update, get, delete)
 
 
 
@@ -98,3 +109,122 @@ submitRecord authToken record = do
         now <- liftIO getCurrentTime
         insert_ (StoredRecordSubmission userId now record)
         pure True
+
+
+getSubmissionPolicy :: ContentRecordVariant -> SystemM (Maybe (Entity RecordSubmissionPolicy))
+getSubmissionPolicy variant = do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  flip runSqlPool systemEnvDatabase $ do
+    mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
+    case mPolicy of
+      Nothing -> do
+        warn' $ "No stored submission policy for variant: " <> T.pack (show variant)
+        pure Nothing
+      ent -> pure ent
+
+
+unsafeIsVerifiedSubmission :: StoredRecordSubmissionId -> SystemM (Maybe Bool)
+unsafeIsVerifiedSubmission submissionId = do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  mVariant <- flip runSqlPool systemEnvDatabase $ do
+    mSubmission <- get submissionId
+    case mSubmission of
+      Nothing -> pure Nothing
+      Just (StoredRecordSubmission _ _ content) -> do
+        pure $ Just $ contentRecordVariant content
+  case mVariant of
+    Nothing -> pure Nothing
+    Just variant -> do
+      mPolicy <- getSubmissionPolicy variant
+      case mPolicy of
+        Nothing -> pure Nothing
+        Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
+          flip runSqlPool systemEnvDatabase $ do
+            assignees <- do
+              as <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
+              pure $ Set.fromList $ (\(Entity _ (RecordAssignedSubmissionPolicy _ editor)) -> editor) <$> as
+            approved <- do
+              as <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalRecord ==. submissionId] []
+              pure $ Set.fromList $ (\(Entity _ (RecordSubmissionApproval _ editor)) -> editor) <$> as
+            let needingApproval = assignees `Set.difference` approved
+                extraApproval = approved `Set.difference` assignees
+            pure $ Just $
+              if Set.null needingApproval
+                then Set.size extraApproval >= additional
+                else False
+
+
+integrateRecord :: StoredRecordSubmissionId -> SystemM Bool
+integrateRecord submissionId = do
+  mIsVerified <- unsafeIsVerifiedSubmission submissionId
+  case mIsVerified of
+    Nothing -> pure False
+    Just isVerified
+      | not isVerified -> pure False
+      | otherwise -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      mRec <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mSub <- get submissionId
+        case mSub of
+          Nothing -> pure Nothing
+          Just (StoredRecordSubmission _ _ record) -> pure (Just record)
+      case mRec of
+        Nothing -> pure False
+        Just record -> do
+          case record of
+            TagRecord tagRecord -> case tagRecord of
+              TagRecordChef chefTag             -> unsafeStoreChefTag chefTag
+              TagRecordCulture cultureTag       -> unsafeStoreCultureTag cultureTag
+              TagRecordDiet dietTag             -> unsafeStoreDietTag dietTag
+              TagRecordFarm farmTag             -> unsafeStoreFarmTag farmTag
+              TagRecordIngredient ingredientTag -> unsafeStoreIngredientTag ingredientTag
+              TagRecordMeal mealTag             -> unsafeStoreMealTag mealTag
+          -- NOTE deletes stored submission
+          liftIO $ flip runSqlPool systemEnvDatabase $ delete submissionId
+          pure True
+
+
+
+approveSubmission :: AuthToken -> StoredRecordSubmissionId -> SystemM Bool
+approveSubmission authToken submissionId = do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  mEditor <- verifyEditorhood authToken
+  case mEditor of
+    Nothing -> pure False
+    Just editorId -> do
+      mVariant <- flip runSqlPool systemEnvDatabase $ do
+        mSubmission <- get submissionId
+        case mSubmission of
+          Nothing -> pure Nothing
+          Just (StoredRecordSubmission _ _ content) -> do
+            pure $ Just $ contentRecordVariant content
+      case mVariant of
+        Nothing -> pure False
+        Just variant -> do
+          mPolicy <- getSubmissionPolicy variant
+          case mPolicy of
+            Nothing -> pure False
+            Just _ -> do
+              flip runSqlPool systemEnvDatabase $
+                insert_ $ RecordSubmissionApproval submissionId editorId
+              void (integrateRecord submissionId)
+              pure True
+
+
+
+verifyEditorhood :: AuthToken -> SystemM (Maybe StoredEditorId)
+verifyEditorhood authToken = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      isEditor <- guardRole userId Editor
+      if not isEditor
+        then pure Nothing
+        else do
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
+          flip runSqlPool systemEnvDatabase $ do
+            mEnt <- getBy (UniqueEditor userId)
+            case mEnt of
+              Nothing -> pure Nothing
+              Just (Entity editorId _) -> pure (Just editorId)

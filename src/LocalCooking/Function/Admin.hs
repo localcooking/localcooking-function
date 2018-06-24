@@ -14,7 +14,9 @@ import LocalCooking.Database.Schema.User
   , EntityField
     (StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword)
   , Unique (UniqueEmail))
-import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
+import LocalCooking.Database.Schema.User.Role
+  ( UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
+import LocalCooking.Database.Schema.User.Editor (StoredEditorId)
 import LocalCooking.Database.Schema.Content
   ( EntityField
     ( RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor
@@ -36,7 +38,7 @@ import LocalCooking.Common.ContentRecord (ContentRecordVariant)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set
 import Data.Time (getCurrentTime)
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
@@ -171,12 +173,29 @@ setSubmissionPolicy authToken (GetSetSubmissionPolicy variant additional assigne
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- getBy (UniqueSubmissionPolicyVariant variant)
-        policyId <- case mEnt of
+        void $ case mEnt of -- FIXME retain policyId?
           Just (Entity p _) -> do
             update p [RecordSubmissionPolicyRecordSubmissionPolicyAdditional =. additional]
             pure p
           Nothing -> do
             insert (RecordSubmissionPolicy variant additional)
-        forM_ assigned $ \editorId -> do
-          insert_ (RecordAssignedSubmissionPolicy policyId editorId)
-        pure True
+      forM_ assigned $ \editorId ->
+        void $ assignSubmissionPolicyByVariant authToken editorId variant
+      pure True
+
+
+
+assignSubmissionPolicyByVariant :: AuthToken -> StoredEditorId -> ContentRecordVariant -> SystemM Bool
+assignSubmissionPolicyByVariant authToken editorId variant = do
+  isAdmin <- verifyAdminhood authToken
+  if not isAdmin
+    then pure False
+    else do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mEnt <- getBy (UniqueSubmissionPolicyVariant variant)
+        case mEnt of
+          Nothing -> pure False
+          Just (Entity policyId _) -> do
+            insert_ (RecordAssignedSubmissionPolicy policyId editorId)
+            pure True

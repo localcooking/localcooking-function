@@ -7,14 +7,15 @@
 
 module LocalCooking.Function.Chef where
 
-import LocalCooking.Semantics.Chef
-  ( GetSetChef (..), MenuSettings (..), MealSettings (..)
-  )
 import LocalCooking.Function.Semantics
   ( getChefTags, getMealTags, getMenuTags, getMealIngredientsDiets
   , assignChefTags, assignMealTags, assignMenuTags, assignMealIngredients
   )
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+import LocalCooking.Semantics.Common (WithId (..))
+import LocalCooking.Semantics.Chef
+  ( GetSetChef (..), MenuSettings (..), MealSettings (..)
+  )
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
@@ -55,33 +56,6 @@ import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (selectList, getBy, insert, insert_, update, get)
 
 
-
-addMealTag :: AuthToken -> MealTag -> SystemM Bool
-addMealTag authToken tag = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      isAuthorized <- guardRole userId Chef
-      if not isAuthorized
-        then pure False
-        else do
-          SystemEnv{systemEnvDatabase} <- getSystemEnv
-          True <$ liftIO (insertMealTag systemEnvDatabase tag)
-
-
-addChefTag :: AuthToken -> ChefTag -> SystemM Bool
-addChefTag authToken tag = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      isAuthorized <- guardRole userId Chef
-      if not isAuthorized
-        then pure False
-        else do
-          SystemEnv{systemEnvDatabase} <- getSystemEnv
-          True <$ liftIO (insertChefTag systemEnvDatabase tag)
 
 
 
@@ -141,23 +115,6 @@ setChef authToken GetSetChef{..} = do
             ]
           liftIO $ assignChefTags systemEnvDatabase chefId getSetChefTags
           pure (Just chefId)
-
-
-data WithId k a = WithId
-  { withIdId :: k
-  , withIdContent :: a
-  } deriving (Eq, Show, Generic)
-
-instance (ToJSON k, ToJSON a) => ToJSON (WithId k a) where
-  toJSON WithId{..} = object
-    [ "id" .= withIdId
-    , "content" .= withIdContent
-    ]
-
-instance (FromJSON k, FromJSON a) => FromJSON (WithId k a) where
-  parseJSON json = case json of
-    Object o -> WithId <$> o .: "id" <*> o .: "content"
-    _ -> typeMismatch "WithId" json
 
 
 getMenus :: AuthToken -> SystemM (Maybe [WithId StoredMenuId MenuSettings])
@@ -352,16 +309,17 @@ verifyChefhood authToken = do
 
 getChefFromAuthToken :: AuthToken -> SystemM (Maybe (WithId StoredChefId StoredChef))
 getChefFromAuthToken authToken = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      isAuthorized <- liftIO (hasRole systemEnvDatabase userId Chef)
-      if not isAuthorized
+      isChef <- verifyChefhood authToken
+      if not isChef
         then pure Nothing
-        else flip runSqlPool systemEnvDatabase $ do
-          mEnt <- getBy (UniqueChefOwner userId)
-          case mEnt of
-            Nothing -> pure Nothing
-            Just (Entity chefId chef) -> pure $ Just $ WithId chefId chef
+        else do
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
+          flip runSqlPool systemEnvDatabase $ do
+            mEnt <- getBy (UniqueChefOwner userId)
+            case mEnt of
+              Nothing -> pure Nothing
+              Just (Entity chefId chef) -> pure $ Just $ WithId chefId chef
