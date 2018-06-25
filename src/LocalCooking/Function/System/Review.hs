@@ -5,7 +5,7 @@
 
 module LocalCooking.Function.System.Review where
 
-import LocalCooking.Database.Schema.Semantics
+import LocalCooking.Database.Schema
   ( StoredChefId, StoredMealId, StoredReview (..)
   , EntityField (StoredReviewStoredReviewChef, StoredReviewStoredReviewMeal)
   )

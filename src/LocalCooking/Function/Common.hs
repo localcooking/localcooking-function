@@ -12,21 +12,20 @@ import LocalCooking.Function.System
   (SystemM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..), getSystemEnv)
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
-import LocalCooking.Database.Schema.Facebook.UserDetails (Unique (FacebookUserDetailsOwner))
-import LocalCooking.Database.Schema.User
-  ( StoredUser (..), StoredUserId
-  , EntityField
-    (StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword)
-  , Unique (UniqueEmail))
-import LocalCooking.Database.Schema.Facebook.AccessToken
-  ( FacebookUserAccessTokenStored (..)
-  )
-import LocalCooking.Database.Schema.Facebook.UserDetails
-  ( FacebookUserDetails (..)
-  , Unique (UniqueFacebookUserId)
-  )
-import LocalCooking.Database.Schema.User.Role (UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
 import LocalCooking.Common.AccessToken.Email (EmailToken)
+import LocalCooking.Database.Schema
+  ( Unique
+    ( FacebookUserDetailsOwner, UniqueEmail, UniqueFacebookUserId
+    )
+  , EntityField
+    ( StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword
+    , UserRoleStoredUserRoleOwner
+    )
+  , StoredUser (..), StoredUserId
+  , FacebookUserAccessTokenStored (..)
+  , FacebookUserDetails (..)
+  , UserRoleStored (..)
+  )
 import SparkPost.Keys (SparkPostCredentials (..), confirmEmailRequest)
 import Facebook.Return (FacebookLoginReturnError, handleFacebookLoginReturn)
 import Google.Keys

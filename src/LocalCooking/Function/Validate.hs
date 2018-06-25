@@ -5,9 +5,8 @@
 module LocalCooking.Function.Validate where
 
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
-import LocalCooking.Database.Query.Semantics (getChefId, getMenuId, getMealId)
-import LocalCooking.Database.Schema.User
-  (Unique (UniqueEmail), StoredUser (..))
+import LocalCooking.Database.Schema
+  ( getChefId, getMenuId, getMealId, Unique (UniqueEmail), StoredUser (..))
 import LocalCooking.Common.User.Password (HashedPassword)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 
@@ -35,31 +34,31 @@ uniqueEmail e = do
 uniqueChefPermalink :: Permalink -> SystemM Bool
 uniqueChefPermalink p = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-  mId <- liftIO (getChefId systemEnvDatabase p)
-  pure $ case mId of
-    Nothing -> False
-    Just _ -> True
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    mId <- getChefId p
+    pure $ case mId of
+      Nothing -> False
+      Just _ -> True
 
 
 uniqueMenuDeadline :: Permalink -> Day -> SystemM Bool
 uniqueMenuDeadline p d = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-  mId <- liftIO (getMenuId systemEnvDatabase p d)
-  pure $ case mId of
-    Nothing -> False
-    Just _ -> True
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    mId <- getMenuId p d
+    pure $ case mId of
+      Nothing -> False
+      Just _ -> True
 
 
 uniqueMealPermalink :: Permalink -> Day -> Permalink -> SystemM Bool
 uniqueMealPermalink c d m = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-  mId <- liftIO (getMealId systemEnvDatabase c d m)
-  pure $ case mId of
-    Nothing -> False
-    Just _ -> True
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    mId <- getMealId c d m
+    pure $ case mId of
+      Nothing -> False
+      Just _ -> True
 
 
 passwordVerify :: AuthToken -> HashedPassword -> SystemM Bool

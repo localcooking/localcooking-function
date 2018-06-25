@@ -27,18 +27,12 @@ import LocalCooking.Common.Rating (Rating)
 import qualified LocalCooking.Common.User.Role as UserRole
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
-import LocalCooking.Database.Query.IngredientDiet (getIngredientByName)
-import LocalCooking.Database.Query.Semantics (getMealId)
-import LocalCooking.Database.Schema.User.Customer
-  ( StoredCustomer (..)
-  , EntityField
-    ( StoredCustomerStoredCustomerAddress
-    , StoredCustomerStoredCustomerName
-    )
-  , Unique (UniqueCustomer))
-import LocalCooking.Database.Schema.Semantics
-  ( StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
+import LocalCooking.Database.Schema
+  ( getIngredientByName, getMealId
+  , StoredCustomer (..)
+  , StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
   , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId, StoredOrderId
+  , StoredMealTag (..), StoredChefTag (..)
   , CartRelation (..)
   , EntityField
     ( StoredMenuStoredMenuAuthor
@@ -49,11 +43,15 @@ import LocalCooking.Database.Schema.Semantics
     , StoredMealStoredMealMenu, StoredReviewStoredReviewMeal
     , CartRelationCartRelationAdded, CartRelationCartRelationVolume
     , CartRelationCartRelationCustomer
+    , StoredCustomerStoredCustomerAddress
+    , StoredCustomerStoredCustomerName
     )
-  , Unique (UniqueChefPermalink, UniqueMealPermalink, UniqueMenuDeadline, UniqueCartRelation)
+  , Unique
+    ( UniqueChefPermalink, UniqueMealPermalink
+    , UniqueMenuDeadline, UniqueCartRelation
+    , UniqueCustomer
+    )
   )
-import LocalCooking.Database.Schema.Tag.Meal (StoredMealTag (..))
-import LocalCooking.Database.Schema.Tag.Chef (StoredChefTag (..))
 
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
@@ -120,16 +118,16 @@ setDiets authToken (Diets ds) = do
     Nothing -> pure False
     Just userId -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
-      mCust <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
         mCustEnt <- getBy (UniqueCustomer userId)
-        case mCustEnt of
+        mCust <- case mCustEnt of
           Nothing -> pure Nothing
           Just (Entity custId _) -> pure (Just custId)
-      case mCust of
-        Nothing -> pure False
-        Just custId -> liftIO $ do
-          assignDiets systemEnvDatabase custId ds
-          pure True
+        case mCust of
+          Nothing -> pure False
+          Just custId -> do
+            assignDiets custId ds
+            pure True
 
 
 getDiets :: AuthToken -> SystemM (Maybe Diets)
@@ -144,7 +142,7 @@ getDiets authToken = do
         case mCustEnt of
           Nothing -> pure Nothing
           Just (Entity custId _) -> do
-            mDiets <- liftIO $ getCustDiets systemEnvDatabase custId
+            mDiets <- getCustDiets custId
             case mDiets of
               Nothing -> pure Nothing
               Just diets -> pure $ Just $ Diets diets
@@ -157,16 +155,16 @@ setAllergies authToken (Allergies as) = do
     Nothing -> pure False
     Just userId -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
-      mCust <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
         mCustEnt <- getBy (UniqueCustomer userId)
-        case mCustEnt of
+        mCust <- case mCustEnt of
           Nothing -> pure Nothing
           Just (Entity custId _) -> pure (Just custId)
-      case mCust of
-        Nothing -> pure False
-        Just custId -> liftIO $ do
-          assignAllergies systemEnvDatabase custId as
-          pure True
+        case mCust of
+          Nothing -> pure False
+          Just custId -> do
+            assignAllergies custId as
+            pure True
 
 
 getAllergies :: AuthToken -> SystemM (Maybe Allergies)
@@ -181,7 +179,7 @@ getAllergies authToken = do
         case mCustEnt of
           Nothing -> pure Nothing
           Just (Entity custId _) -> do
-            mAllergies <- liftIO $ getCustAllergies systemEnvDatabase custId
+            mAllergies <- getCustAllergies custId
             case mAllergies of
               Nothing -> pure Nothing
               Just allergies -> pure $ Just $ Allergies allergies
@@ -250,16 +248,16 @@ getMealSynopsis :: StoredMealId -> SystemM (Maybe MealSynopsis)
 getMealSynopsis mealId = do
   SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
 
-  mCont <- flip runSqlPool systemEnvDatabase $ do
+  mCont <- liftIO $ flip runSqlPool systemEnvDatabase $ do
     mMeal <- get mealId
     case mMeal of
       Nothing -> pure Nothing
       Just (StoredMeal title permalink _ heading _ _ images price) -> do
-        mTags <- liftIO (getMealTags systemEnvDatabase mealId)
+        mTags <- getMealTags mealId
         case mTags of
           Nothing -> pure Nothing
           Just tags -> do
-            mIngDiets <- liftIO (getMealIngredientsDiets systemEnvDatabase mealId)
+            mIngDiets <- getMealIngredientsDiets mealId
             case mIngDiets of
               Nothing -> pure Nothing
               Just (_,diets) -> do
@@ -292,12 +290,12 @@ getChefSynopsis :: StoredChefId -> SystemM (Maybe ChefSynopsis)
 getChefSynopsis chefId = do
   SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
 
-  mStoredChef <- flip runSqlPool systemEnvDatabase $ do
+  mStoredChef <- liftIO $ flip runSqlPool systemEnvDatabase $ do
     mChef <- get chefId
     case mChef of
       Nothing -> pure Nothing
       Just (StoredChef _ name permalink _ _ avatar) -> do
-        mTags <- liftIO (getChefTags systemEnvDatabase chefId)
+        mTags <- getChefTags chefId
         case mTags of
           Nothing -> pure Nothing
           Just tags -> do
@@ -324,7 +322,7 @@ getChefMenuSynopses :: StoredChefId -> SystemM (Maybe [MenuSynopsis])
 getChefMenuSynopses chefId = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
 
-  flip runSqlPool systemEnvDatabase $ do
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
     mChef <- get chefId
     case mChef of
       Nothing -> pure Nothing
@@ -334,7 +332,7 @@ getChefMenuSynopses chefId = do
           case published of
             Nothing -> pure Nothing
             Just p -> do
-              mTags <- liftIO (getMenuTags systemEnvDatabase menuId)
+              mTags <- getMenuTags menuId
               case mTags of
                 Nothing -> pure Nothing
                 Just tags ->
@@ -365,12 +363,12 @@ getMenuMealSynopses menuId = do
 browseChef :: Permalink -> SystemM (Maybe Chef)
 browseChef chefPermalink = do
   SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
-  mDeets <- flip runSqlPool systemEnvDatabase $ do
+  mDeets <- liftIO $ flip runSqlPool systemEnvDatabase $ do
     mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
     case mChefEnt of
       Nothing -> pure Nothing
       Just (Entity chefId (StoredChef _ name permalink bio images _)) -> do
-        mTags <- liftIO (getChefTags systemEnvDatabase chefId)
+        mTags <- getChefTags chefId
         case mTags of
           Nothing -> pure Nothing
           Just tags -> do
@@ -384,7 +382,6 @@ browseChef chefPermalink = do
                 liftIO (modifyIORef countRef (+ n))
               liftIO (readIORef countRef)
             pure $ Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders)
-
   case mDeets of
     Nothing -> pure Nothing
     Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders) -> do
@@ -463,11 +460,11 @@ browseMeal chefPermalink deadline mealPermalink = do
             case mMeal of
               Nothing -> pure Nothing
               Just (Entity mealId (StoredMeal title permalink _ _ desc inst images price)) -> do
-                mIngDiets <- liftIO (getMealIngredientsDiets systemEnvDatabase mealId)
+                mIngDiets <- getMealIngredientsDiets mealId
                 case mIngDiets of
                   Nothing -> pure Nothing
                   Just (ings,diets) -> do
-                    mTags <- liftIO (getMealTags systemEnvDatabase mealId)
+                    mTags <- getMealTags mealId
                     case mTags of
                       Nothing -> pure Nothing
                       Just tags -> do
@@ -481,15 +478,14 @@ browseMeal chefPermalink deadline mealPermalink = do
                         mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
                         case mRating of
                           Nothing -> pure Nothing
-                          Just rating ->
+                          Just rating -> do
                             pure $ Just (title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets)
-
   case mStoredMeal of
     Nothing -> pure Nothing
     Just (title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets) -> do
       reviews <- fmap catMaybes $ forM reviewIds getReview
-      ings' <- fmap catMaybes $ liftIO $
-        forM ings $ getIngredientByName systemEnvDatabase
+      ings' <- liftIO $ flip runSqlPool systemEnvDatabase $ fmap catMaybes $
+        forM ings getIngredientByName
       pure $ Just Meal
         { mealTitle = title
         , mealPermalink = permalink
@@ -526,12 +522,12 @@ addToCart authToken chefPermalink deadline mealPermalink vol = do
     Nothing -> pure False
     Just userId -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
-      mMealId <- liftIO (getMealId systemEnvDatabase chefPermalink deadline mealPermalink)
-      case mMealId of
-        Nothing -> pure False
-        Just mealId -> do
-          now <- liftIO getCurrentTime
-          liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mMealId <- getMealId chefPermalink deadline mealPermalink
+        case mMealId of
+          Nothing -> pure False
+          Just mealId -> do
+            now <- liftIO getCurrentTime
             mEntry <- getBy (UniqueCartRelation userId mealId)
             case mEntry of
               Nothing ->
@@ -541,7 +537,7 @@ addToCart authToken chefPermalink deadline mealPermalink vol = do
                   [ CartRelationCartRelationVolume =. (vol + oldVol)
                   , CartRelationCartRelationAdded =. now
                   ]
-          pure True
+            pure True
 
 -- checkout :: ?
 

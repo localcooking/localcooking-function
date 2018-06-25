@@ -8,15 +8,17 @@ module LocalCooking.Function.Admin where
 import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..))
 import LocalCooking.Semantics.Admin (SetUser (..), NewUser (..), GetSetSubmissionPolicy (..))
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
-import LocalCooking.Database.Schema.Facebook.UserDetails (FacebookUserDetails (..), Unique (FacebookUserDetailsOwner))
-import LocalCooking.Database.Schema.User
-  ( StoredUser (..)
+import LocalCooking.Database.Schema
+  ( FacebookUserDetails (..)
+  , StoredUser (..)
   , EntityField
-    (StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword)
-  , Unique (UniqueEmail))
-import LocalCooking.Database.Schema.User.Role
-  ( UserRoleStored (..), EntityField (UserRoleStoredUserRoleOwner))
-import LocalCooking.Database.Schema.User.Editor (StoredEditorId)
+    ( StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword
+    , UserRoleStoredUserRoleOwner
+    )
+  , Unique (UniqueEmail, FacebookUserDetailsOwner)
+  , UserRoleStored (..)
+  , StoredEditorId
+  )
 import LocalCooking.Database.Schema.Content
   ( EntityField
     ( RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor
@@ -33,7 +35,7 @@ import LocalCooking.Database.Schema.Content
   )
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Admin))
-import LocalCooking.Common.ContentRecord (ContentRecordVariant)
+import LocalCooking.Semantics.ContentRecord (ContentRecordVariant)
 
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set

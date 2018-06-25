@@ -10,27 +10,30 @@ module LocalCooking.Function.Content where
 import LocalCooking.Function.Tag (unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag, unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag)
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.Content (SetEditor (..), GetEditor (..))
+import LocalCooking.Semantics.ContentRecord
+  (ContentRecord (TagRecord), TagRecord (..), contentRecordVariant, ContentRecordVariant)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
-import LocalCooking.Common.ContentRecord
-  (ContentRecord (TagRecord), TagRecord (..), contentRecordVariant, ContentRecordVariant)
 import LocalCooking.Common.User.Role (UserRole (Editor))
-import LocalCooking.Database.Schema.User.Editor
-  ( StoredEditor (..), StoredEditorId, Unique (UniqueEditor)
+import LocalCooking.Database.Schema
+  ( StoredEditor (..), StoredEditorId
   , EntityField
     ( StoredEditorStoredEditorName
     )
+  , Unique
+    ( UniqueEditor
+    )
   )
 import LocalCooking.Database.Schema.Content
-  ( EntityField
+  ( Unique
+    ( UniqueSubmissionPolicyVariant
+    )
+  , EntityField
     ( RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor
     , RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy
     , RecordSubmissionApprovalRecordSubmissionApprovalEditor
     , RecordSubmissionApprovalRecordSubmissionApprovalRecord
-    )
-  , Unique
-    ( UniqueSubmissionPolicyVariant
     )
   , RecordAssignedSubmissionPolicy (..)
   , RecordSubmissionPolicy (..)

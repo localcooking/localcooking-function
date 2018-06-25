@@ -27,10 +27,7 @@ import LocalCooking.Common.AccessToken.Email (EmailToken)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Password (HashedPassword)
 import LocalCooking.Common.User.Role (UserRole)
-import LocalCooking.Database.Schema (migrateAll)
-import LocalCooking.Database.Schema.User (StoredUserId)
-import LocalCooking.Database.Query.Salt (getPasswordSalt)
-import LocalCooking.Database.Query.Semantics.Admin (hasRole)
+import LocalCooking.Database.Schema (migrateAll, StoredUserId, getPasswordSalt, hasRole)
 import Facebook.Types (FacebookAppCredentials)
 import Google.Keys (GoogleCredentials)
 import SparkPost.Keys (SparkPostCredentials)
@@ -60,7 +57,7 @@ import Control.Exception (bracket)
 import Control.Concurrent.Async (async, cancel)
 import Control.Concurrent.STM (STM, atomically)
 import Control.Logging (withStderrLogging)
-import Database.Persist.Sql (ConnectionPool)
+import Database.Persist.Sql (ConnectionPool, runSqlPool, runMigration)
 import Database.Persist.Postgresql (createPostgresqlPool)
 import Network.HTTP.Client (Manager)
 import Network.HTTP.Client.TLS (newTlsManager)
@@ -152,10 +149,10 @@ newSystemEnv NewSystemEnvArgs{..} = do
         , "dbname=" <> dbName
         ]
   systemEnvDatabase <- runStderrLoggingT (createPostgresqlPool connStr 10)
-  migrateAll systemEnvDatabase
+  runSqlPool (runMigration migrateAll) systemEnvDatabase
   systemEnvManagers <- defManagers
   systemEnvTokenContexts <- atomically defTokenContexts
-  systemEnvSalt <- getPasswordSalt systemEnvDatabase
+  systemEnvSalt <- runSqlPool getPasswordSalt systemEnvDatabase
   systemEnvReviews <- newReviewAccumulator
 
   pure SystemEnv
@@ -251,4 +248,4 @@ getUserId authToken = do
 guardRole :: StoredUserId -> UserRole -> SystemM Bool
 guardRole userId r = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO (hasRole systemEnvDatabase userId r)
+  liftIO $ flip runSqlPool systemEnvDatabase $ hasRole userId r

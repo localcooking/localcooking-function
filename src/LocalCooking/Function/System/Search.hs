@@ -8,8 +8,7 @@ module LocalCooking.Function.System.Search where
 import LocalCooking.Common.Tag.Meal (MealTag (..))
 import LocalCooking.Common.Tag.Chef (ChefTag (..))
 import LocalCooking.Common.Tag (Tag (..))
-import LocalCooking.Database.Schema.Tag.Meal (StoredMealTag (..))
-import LocalCooking.Database.Schema.Tag.Chef (StoredChefTag (..))
+import LocalCooking.Database.Schema (StoredMealTag (..), StoredChefTag (..))
 
 import Data.Default (def)
 import Data.Text (Text)
@@ -42,6 +41,8 @@ sphinxDocumentHTTPStream doc backend chunk flush =
     stream :: ConduitT () Builder (ReaderT SqlBackend (ResourceT IO)) ()
     stream = doc .| renderBuilder def
 
+
+-- TODO different documents for other tags, compiled search techniques
 
 mealTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
 mealTagsDocument = do

@@ -10,21 +10,21 @@
 module LocalCooking.Function.Tag where
 
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
-import LocalCooking.Database.Schema.Tag.Chef (StoredChefTag (..))
-import LocalCooking.Database.Schema.Tag.Culture (StoredCultureTag (..))
-import LocalCooking.Database.Schema.Tag.Diet (StoredDietTag (..))
-import LocalCooking.Database.Schema.Tag.Farm (StoredFarmTag (..))
-import LocalCooking.Database.Schema.Tag.Ingredient (StoredIngredientTag (..))
-import LocalCooking.Database.Schema.Tag.Meal (StoredMealTag (..))
-import LocalCooking.Database.Schema.Content (StoredRecordSubmission (..))
-import LocalCooking.Database.Schema.User (StoredUserId)
+import LocalCooking.Semantics.ContentRecord (ContentRecord (TagRecord), TagRecord)
+import LocalCooking.Database.Schema
+  ( StoredChefTag (..), StoredCultureTag (..)
+  , StoredDietTag (..), StoredFarmTag (..)
+  , StoredIngredientTag (..), StoredMealTag (..)
+  , StoredUserId)
+import LocalCooking.Database.Schema.Content
+  ( StoredRecordSubmission (..)
+  )
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.Tag.Culture (CultureTag)
 import LocalCooking.Common.Tag.Diet (DietTag)
 import LocalCooking.Common.Tag.Farm (FarmTag)
 import LocalCooking.Common.Tag.Ingredient (IngredientTag)
 import LocalCooking.Common.Tag.Meal (MealTag)
-import LocalCooking.Common.ContentRecord (ContentRecord (TagRecord), TagRecord)
 
 import Data.Time (getCurrentTime)
 import Data.Text (Text)

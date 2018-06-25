@@ -14,7 +14,7 @@ import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
-import LocalCooking.Database.Schema.Semantics
+import LocalCooking.Database.Schema
   ( StoredChef (..), StoredMenu (..), StoredMeal (..)
   , StoredChefId, StoredMenuId, StoredMealId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)

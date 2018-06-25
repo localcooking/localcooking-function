@@ -20,7 +20,7 @@ import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
-import LocalCooking.Database.Schema.Semantics
+import LocalCooking.Database.Schema
   ( StoredChef (..), StoredMenu (..), StoredMeal (..)
   , StoredChefId, StoredMenuId, StoredMealId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
@@ -38,12 +38,12 @@ import LocalCooking.Database.Schema.Semantics
     , StoredMealStoredMealPrice, StoredMealStoredMealTitle
     )
   , Unique
-    ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline)
+    ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline
+    , UniqueStoredMealTag, UniqueStoredChefTag
+    )
+  , hasRole
+  , getStoredIngredientTagId
   )
-import LocalCooking.Database.Query.Semantics.Admin (hasRole)
-import LocalCooking.Database.Query.Tag.Meal (insertMealTag, getMealTagId)
-import LocalCooking.Database.Query.Tag.Chef (insertChefTag, getChefTagId)
-import LocalCooking.Database.Query.IngredientDiet (getStoredIngredientTagId)
 
 import Data.Maybe (catMaybes)
 import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))
@@ -67,7 +67,7 @@ getChef authToken = do
     Just (WithId chefId (StoredChef _ name permalink bio images avatar)) -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
-        mTags <- liftIO (getChefTags systemEnvDatabase chefId)
+        mTags <- getChefTags chefId
         case mTags of
           Nothing -> pure Nothing
           Just tags ->
@@ -100,21 +100,22 @@ setChef authToken GetSetChef{..} = do
             getSetChefImages
             getSetChefAvatar
           forM_ getSetChefTags $ \t -> do
-            mChefTagId <- liftIO (getChefTagId systemEnvDatabase t)
+            mChefTagId <- getBy (UniqueStoredChefTag t)
             case mChefTagId of
               Nothing -> pure ()
-              Just chefTagId -> insert_ (ChefTagRelation chefId chefTagId)
+              Just (Entity chefTagId _) -> insert_ (ChefTagRelation chefId chefTagId)
           pure (Just chefId)
         Just (WithId chefId _) -> do
-          flip runSqlPool systemEnvDatabase $ update chefId
-            [ StoredChefStoredChefName =. getSetChefName
-            , StoredChefStoredChefPermalink =. getSetChefPermalink
-            , StoredChefStoredChefBio =. getSetChefBio
-            , StoredChefStoredChefImages =. getSetChefImages
-            , StoredChefStoredChefAvatar =. getSetChefAvatar
-            ]
-          liftIO $ assignChefTags systemEnvDatabase chefId getSetChefTags
-          pure (Just chefId)
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            update chefId
+              [ StoredChefStoredChefName =. getSetChefName
+              , StoredChefStoredChefPermalink =. getSetChefPermalink
+              , StoredChefStoredChefBio =. getSetChefBio
+              , StoredChefStoredChefImages =. getSetChefImages
+              , StoredChefStoredChefAvatar =. getSetChefAvatar
+              ]
+            assignChefTags chefId getSetChefTags
+            pure (Just chefId)
 
 
 getMenus :: AuthToken -> SystemM (Maybe [WithId StoredMenuId MenuSettings])
@@ -128,7 +129,7 @@ getMenus authToken = do
         xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
         fmap (Just . catMaybes)
           $ forM xs $ \(Entity menuId (StoredMenu pub dead heading desc imgs _)) -> do
-              mTags <- liftIO (getMenuTags systemEnvDatabase menuId)
+              mTags <- getMenuTags menuId
               case mTags of
                 Nothing -> pure Nothing
                 Just tags ->
@@ -165,10 +166,10 @@ newMenu authToken MenuSettings{..} = do
               menuSettingsImages
               chefId
             forM_ menuSettingsTags $ \tag -> do
-              mTagId <- liftIO (getMealTagId systemEnvDatabase tag)
+              mTagId <- getBy (UniqueStoredMealTag tag)
               case mTagId of
                 Nothing -> pure ()
-                Just tagId -> insert_ (MenuTagRelation menuId tagId)
+                Just (Entity tagId _) -> insert_ (MenuTagRelation menuId tagId)
             pure (Just menuId)
 
 
@@ -179,7 +180,7 @@ setMenu authToken (WithId menuId MenuSettings{..}) = do
     then pure False
     else do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
-      ok <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- get menuId
         case mEnt of
           Nothing -> pure False
@@ -191,12 +192,8 @@ setMenu authToken (WithId menuId MenuSettings{..}) = do
               , StoredMenuStoredMenuDescription =. menuSettingsDescription
               , StoredMenuStoredMenuImages =. menuSettingsImages
               ]
+            assignMenuTags menuId menuSettingsTags
             pure True
-      if not ok
-        then pure False
-        else liftIO $ do
-          assignMenuTags systemEnvDatabase menuId menuSettingsTags
-          pure True
 
 
 getMeals :: AuthToken -> StoredMenuId -> SystemM (Maybe [WithId StoredMealId MealSettings])
@@ -206,31 +203,31 @@ getMeals authToken menuId = do
     then pure Nothing
     else do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
-      xs <- liftIO $ flip runSqlPool systemEnvDatabase $
-        selectList [StoredMealStoredMealMenu ==. menuId] []
-      fmap (Just . catMaybes) $
-        forM xs $ \(Entity mealId (StoredMeal title permalink _ heading desc inst imgs price)) -> do
-          mTags <- liftIO (getMealTags systemEnvDatabase mealId)
-          case mTags of
-            Nothing -> pure Nothing
-            Just tags -> do
-              mIngDiets <- liftIO (getMealIngredientsDiets systemEnvDatabase mealId)
-              case mIngDiets of
-                Nothing -> pure Nothing
-                Just (ings,_) ->
-                  pure $ Just $ WithId
-                    mealId
-                    MealSettings
-                    { mealSettingsTitle = title
-                    , mealSettingsPermalink = permalink
-                    , mealSettingsHeading = heading
-                    , mealSettingsDescription = desc
-                    , mealSettingsInstructions = inst
-                    , mealSettingsImages = imgs
-                    , mealSettingsIngredients = ings
-                    , mealSettingsTags = tags
-                    , mealSettingsPrice = price
-                    }
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        xs <- selectList [StoredMealStoredMealMenu ==. menuId] []
+        fmap (Just . catMaybes) $
+          forM xs $ \(Entity mealId (StoredMeal title permalink _ heading desc inst imgs price)) -> do
+            mTags <- getMealTags mealId
+            case mTags of
+              Nothing -> pure Nothing
+              Just tags -> do
+                mIngDiets <- getMealIngredientsDiets mealId
+                case mIngDiets of
+                  Nothing -> pure Nothing
+                  Just (ings,_) ->
+                    pure $ Just $ WithId
+                      mealId
+                      MealSettings
+                      { mealSettingsTitle = title
+                      , mealSettingsPermalink = permalink
+                      , mealSettingsHeading = heading
+                      , mealSettingsDescription = desc
+                      , mealSettingsInstructions = inst
+                      , mealSettingsImages = imgs
+                      , mealSettingsIngredients = ings
+                      , mealSettingsTags = tags
+                      , mealSettingsPrice = price
+                      }
                     
 
 
@@ -256,15 +253,15 @@ newMeal authToken (WithId menuId MealSettings{..}) = do
               mealSettingsImages
               mealSettingsPrice
             forM_ mealSettingsIngredients $ \ingName -> do
-              mIngId <- liftIO (getStoredIngredientTagId systemEnvDatabase ingName)
+              mIngId <- getStoredIngredientTagId ingName
               case mIngId of
                 Nothing -> pure ()
                 Just ingId -> insert_ (MealIngredient mealId ingId)
             forM_ mealSettingsTags $ \tag -> do
-              mTagId <- liftIO (getMealTagId systemEnvDatabase tag)
+              mTagId <- getBy (UniqueStoredMealTag tag)
               case mTagId of
                 Nothing -> pure ()
-                Just tagId -> insert_ (MealTagRelation mealId tagId)
+                Just (Entity tagId _) -> insert_ (MealTagRelation mealId tagId)
             pure (Just mealId)
 
 
@@ -275,7 +272,7 @@ setMeal authToken (WithId menuId (WithId mealId MealSettings{..})) = do
     then pure False
     else do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
-      ok <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- get mealId
         case mEnt of
           Nothing -> pure False
@@ -290,13 +287,9 @@ setMeal authToken (WithId menuId (WithId mealId MealSettings{..})) = do
               , StoredMealStoredMealImages =. mealSettingsImages
               , StoredMealStoredMealPrice =. mealSettingsPrice
               ]
+            assignMealTags mealId mealSettingsTags
+            assignMealIngredients mealId mealSettingsIngredients
             pure True
-      if not ok
-        then pure False
-        else liftIO $ do
-          assignMealTags systemEnvDatabase mealId mealSettingsTags
-          assignMealIngredients systemEnvDatabase mealId mealSettingsIngredients
-          pure True
 
 
 verifyChefhood :: AuthToken -> SystemM Bool
