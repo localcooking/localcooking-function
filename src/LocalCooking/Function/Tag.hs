@@ -11,7 +11,7 @@ module LocalCooking.Function.Tag where
 
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.ContentRecord
-  ( ContentRecord (TagRecord)
+  ( ContentRecord (TagRecord), contentRecordVariant
   , TagRecord (TagRecordChef, TagRecordMeal)
   )
 import LocalCooking.Database.Schema
@@ -95,7 +95,8 @@ submitTag userId tag = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   flip runSqlPool systemEnvDatabase $ do
     now <- liftIO getCurrentTime
-    insert_ (StoredRecordSubmission userId now (TagRecord tag))
+    let record = TagRecord tag
+    insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
 
 
 submitChefTag :: StoredUserId -> ChefTag -> SystemM ()

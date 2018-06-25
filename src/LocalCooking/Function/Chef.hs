@@ -18,7 +18,9 @@ import LocalCooking.Semantics.Chef
   ( GetSetChef (..), MenuSettings (..), MealSettings (..)
   )
 import LocalCooking.Semantics.ContentRecord
-  ( ContentRecord (ChefRecord), ChefRecord (..))
+  ( ContentRecord (ChefRecord), ChefRecord (..)
+  , contentRecordVariant
+  )
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema
@@ -122,8 +124,8 @@ setChef authToken getSetChef = do
     Nothing -> pure False
     Just userId -> liftIO $ flip runSqlPool systemEnvDatabase $ do
       now <- liftIO getCurrentTime
-      insert_ $ StoredRecordSubmission userId now $
-        ChefRecord $ ChefRecordChef getSetChef
+      let record = ChefRecord (ChefRecordChef getSetChef)
+      insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
       pure True
 
 
@@ -194,8 +196,8 @@ newMenu authToken menu = do
           SystemEnv{systemEnvDatabase} <- getSystemEnv
           liftIO $ flip runSqlPool systemEnvDatabase $ do
             now <- liftIO getCurrentTime
-            insert_ $ StoredRecordSubmission userId now $
-              ChefRecord $ ChefRecordNewMenu menu
+            let record = ChefRecord (ChefRecordNewMenu menu)
+            insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
             pure True
 
 
@@ -235,8 +237,8 @@ setMenu authToken menu = do
           SystemEnv{systemEnvDatabase} <- getSystemEnv
           liftIO $ flip runSqlPool systemEnvDatabase $ do
             now <- liftIO getCurrentTime
-            insert_ $ StoredRecordSubmission userId now $
-              ChefRecord $ ChefRecordSetMenu menu
+            let record = ChefRecord (ChefRecordSetMenu menu)
+            insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
             pure True
 
 
@@ -321,8 +323,8 @@ newMeal authToken meal = do
           SystemEnv{systemEnvDatabase} <- getSystemEnv
           liftIO $ flip runSqlPool systemEnvDatabase $ do
             now <- liftIO getCurrentTime
-            insert_ $ StoredRecordSubmission userId now $
-              ChefRecord $ ChefRecordNewMeal meal
+            let record = ChefRecord (ChefRecordNewMeal meal)
+            insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
             pure True
 
 
@@ -366,8 +368,8 @@ setMeal authToken meal = do
           SystemEnv{systemEnvDatabase} <- getSystemEnv
           liftIO $ flip runSqlPool systemEnvDatabase $ do
             now <- liftIO getCurrentTime
-            insert_ $ StoredRecordSubmission userId now $
-              ChefRecord $ ChefRecordSetMeal meal
+            let record = ChefRecord (ChefRecordSetMeal meal)
+            insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
             pure True
 
 

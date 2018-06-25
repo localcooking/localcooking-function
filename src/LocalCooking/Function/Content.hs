@@ -11,7 +11,10 @@ import LocalCooking.Function.Tag (unsafeStoreChefTag, unsafeStoreCultureTag, uns
 import LocalCooking.Function.Chef (unsafeSetChef, unsafeNewMenu, unsafeSetMenu, unsafeNewMeal, unsafeSetMeal)
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.Common (WithId (..))
-import LocalCooking.Semantics.Content (SetEditor (..), GetEditor (..))
+import LocalCooking.Semantics.Content
+  ( SetEditor (..), GetEditor (..)
+  , GetRecordSubmissionPolicy (..), GetRecordSubmission (..)
+  )
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (..), TagRecord (..), ChefRecord (..)
   , contentRecordVariant, ContentRecordVariant)
@@ -35,6 +38,7 @@ import LocalCooking.Database.Schema.Content
     , RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy
     , RecordSubmissionApprovalRecordSubmissionApprovalEditor
     , RecordSubmissionApprovalRecordSubmissionApprovalRecord
+    , StoredRecordSubmissionStoredRecordSubmissionVariant
     )
   , RecordAssignedSubmissionPolicy (..)
   , RecordSubmissionPolicy (..), RecordSubmissionPolicyId
@@ -99,21 +103,8 @@ getEditor authToken = do
             pure $ Just $ GetEditor name variants approved
 
 
--- NOTE Written in each authoring module - this module uses their unsafe defs
--- submitRecord :: AuthToken -> ContentRecord -> SystemM Bool
--- submitRecord authToken record = do
---   mUserId <- getUserId authToken
---   case mUserId of
---     Nothing -> pure False
---     Just userId -> do
---       SystemEnv{systemEnvDatabase} <- getSystemEnv
---       liftIO $ flip runSqlPool systemEnvDatabase $ do
---         now <- liftIO getCurrentTime
---         insert_ (StoredRecordSubmission userId now record)
---         pure True
 
-
-getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe (WithId RecordSubmissionPolicyId RecordSubmissionPolicy))
+getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe (WithId RecordSubmissionPolicyId GetRecordSubmissionPolicy))
 getSubmissionPolicy authToken variant = do
   mEditor <- verifyEditorhood authToken
   case mEditor of
@@ -126,7 +117,12 @@ getSubmissionPolicy authToken variant = do
           Nothing -> do
             warn' $ "No stored submission policy for variant: " <> T.pack (show variant)
             pure Nothing
-          Just (Entity policyId policy) -> pure $ Just $ WithId policyId policy
+          Just (Entity policyId (RecordSubmissionPolicy variant additional)) -> do
+            assigned <- do
+              xs <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
+              pure $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
+            pure $ Just $ WithId policyId $
+              GetRecordSubmissionPolicy variant additional assigned
 
 
 isApprovedSubmission :: AuthToken -> StoredRecordSubmissionId -> SystemM (Maybe Bool)
@@ -136,19 +132,17 @@ isApprovedSubmission authToken submissionId = do
     mSubmission <- get submissionId
     case mSubmission of
       Nothing -> pure Nothing
-      Just (StoredRecordSubmission _ _ content) -> do
-        pure $ Just $ contentRecordVariant content
+      Just (StoredRecordSubmission _ _ _ variant) -> do
+        pure $ Just variant
   case mVariant of
     Nothing -> pure Nothing
     Just variant -> do
       mPolicy <- getSubmissionPolicy authToken variant
       case mPolicy of
         Nothing -> pure Nothing
-        Just (WithId policyId (RecordSubmissionPolicy _ additional)) -> do
+        Just (WithId policyId (GetRecordSubmissionPolicy _ additional assigned)) -> do
           flip runSqlPool systemEnvDatabase $ do
-            assignees <- do
-              as <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
-              pure $ Set.fromList $ (\(Entity _ (RecordAssignedSubmissionPolicy _ editor)) -> editor) <$> as
+            let assignees = Set.fromList assigned
             approved <- do
               as <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalRecord ==. submissionId] []
               pure $ Set.fromList $ (\(Entity _ (RecordSubmissionApproval _ editor)) -> editor) <$> as
@@ -173,7 +167,7 @@ integrateRecord authToken submissionId = do
         mSub <- get submissionId
         case mSub of
           Nothing -> pure Nothing
-          Just (StoredRecordSubmission author _ record) -> pure $ Just (author, record)
+          Just (StoredRecordSubmission author _ record _) -> pure $ Just (author, record)
       case mUserRec of
         Nothing -> pure False
         Just (userId, record) -> do
@@ -196,6 +190,23 @@ integrateRecord authToken submissionId = do
 
 
 
+getSubmissions :: AuthToken -> ContentRecordVariant -> SystemM (Maybe [WithId StoredRecordSubmissionId GetRecordSubmission])
+getSubmissions authToken variant = do
+  mEditor <- verifyEditorhood authToken
+  case mEditor of
+    Nothing -> pure Nothing
+    Just _ -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        xs <- selectList [StoredRecordSubmissionStoredRecordSubmissionVariant ==. variant] []
+        fmap Just $ forM xs $ \(Entity submissionId (StoredRecordSubmission author timestamp content _)) -> do
+          approvals <- do
+            ys <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalRecord ==. submissionId] []
+            pure $ (\(Entity _ (RecordSubmissionApproval _ e)) -> e) <$> ys
+          pure $ WithId submissionId $ GetRecordSubmission author timestamp content approvals
+
+
+
 approveSubmission :: AuthToken -> StoredRecordSubmissionId -> SystemM Bool
 approveSubmission authToken submissionId = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
@@ -207,8 +218,8 @@ approveSubmission authToken submissionId = do
         mSubmission <- get submissionId
         case mSubmission of
           Nothing -> pure Nothing
-          Just (StoredRecordSubmission _ _ content) -> do
-            pure $ Just $ contentRecordVariant content
+          Just (StoredRecordSubmission _ _ _ variant) -> do
+            pure $ Just variant
       case mVariant of
         Nothing -> pure False
         Just variant -> do
