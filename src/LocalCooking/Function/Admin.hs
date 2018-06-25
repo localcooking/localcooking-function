@@ -179,13 +179,13 @@ setSubmissionPolicy authToken (GetSetSubmissionPolicy variant additional assigne
           Nothing -> do
             insert (RecordSubmissionPolicy variant additional)
       forM_ assigned $ \editorId ->
-        void $ assignSubmissionPolicyByVariant authToken editorId variant
+        void $ assignSubmissionPolicy authToken editorId variant
       pure True
 
 
 
-assignSubmissionPolicyByVariant :: AuthToken -> StoredEditorId -> ContentRecordVariant -> SystemM Bool
-assignSubmissionPolicyByVariant authToken editorId variant = do
+assignSubmissionPolicy :: AuthToken -> StoredEditorId -> ContentRecordVariant -> SystemM Bool
+assignSubmissionPolicy authToken editorId variant = do
   isAdmin <- verifyAdminhood authToken
   if not isAdmin
     then pure False
