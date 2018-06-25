@@ -9,7 +9,8 @@
 
 module LocalCooking.Function.Tag where
 
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+import LocalCooking.Function.System
+  (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (TagRecord), contentRecordVariant
   , TagRecord (TagRecordChef, TagRecordMeal)
@@ -23,6 +24,7 @@ import LocalCooking.Database.Schema
 import LocalCooking.Database.Schema.Content
   ( StoredRecordSubmission (..)
   )
+import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.Tag.Culture (CultureTag)
 import LocalCooking.Common.Tag.Diet (DietTag)
@@ -90,21 +92,26 @@ unsafeStoreMealTag tag = do
 -- * Safe Storage
 
 -- | As a content record submission
-submitTag :: StoredUserId -> TagRecord -> SystemM ()
-submitTag userId tag = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  flip runSqlPool systemEnvDatabase $ do
-    now <- liftIO getCurrentTime
-    let record = TagRecord tag
-    insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
+submitTag :: AuthToken -> TagRecord -> SystemM Bool
+submitTag token tag = do
+  mUserId <- getUserId token
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      flip runSqlPool systemEnvDatabase $ do
+        now <- liftIO getCurrentTime
+        let record = TagRecord tag
+        insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
+        pure True
 
 
-submitChefTag :: StoredUserId -> ChefTag -> SystemM ()
-submitChefTag userId = submitTag userId . TagRecordChef
+submitChefTag :: AuthToken -> ChefTag -> SystemM Bool
+submitChefTag token = submitTag token . TagRecordChef
 
 
-submitMealTag :: StoredUserId -> MealTag -> SystemM ()
-submitMealTag userId = submitTag userId . TagRecordMeal
+submitMealTag :: AuthToken -> MealTag -> SystemM Bool
+submitMealTag token = submitTag token . TagRecordMeal
 
 
 -- * Search
