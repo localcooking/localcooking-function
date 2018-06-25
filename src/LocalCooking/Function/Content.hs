@@ -10,6 +10,7 @@ module LocalCooking.Function.Content where
 import LocalCooking.Function.Tag (unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag, unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag)
 import LocalCooking.Function.Chef (unsafeSetChef, unsafeNewMenu, unsafeSetMenu, unsafeNewMeal, unsafeSetMeal)
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Content (SetEditor (..), GetEditor (..))
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (..), TagRecord (..), ChefRecord (..)
@@ -36,7 +37,7 @@ import LocalCooking.Database.Schema.Content
     , RecordSubmissionApprovalRecordSubmissionApprovalRecord
     )
   , RecordAssignedSubmissionPolicy (..)
-  , RecordSubmissionPolicy (..)
+  , RecordSubmissionPolicy (..), RecordSubmissionPolicyId
   , StoredRecordSubmission (..), StoredRecordSubmissionId
   , RecordSubmissionApproval (..)
   )
@@ -98,33 +99,38 @@ getEditor authToken = do
             pure $ Just $ GetEditor name variants approved
 
 
-submitRecord :: AuthToken -> ContentRecord -> SystemM Bool
-submitRecord authToken record = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure False
-    Just userId -> do
+-- NOTE Written in each authoring module - this module uses their unsafe defs
+-- submitRecord :: AuthToken -> ContentRecord -> SystemM Bool
+-- submitRecord authToken record = do
+--   mUserId <- getUserId authToken
+--   case mUserId of
+--     Nothing -> pure False
+--     Just userId -> do
+--       SystemEnv{systemEnvDatabase} <- getSystemEnv
+--       liftIO $ flip runSqlPool systemEnvDatabase $ do
+--         now <- liftIO getCurrentTime
+--         insert_ (StoredRecordSubmission userId now record)
+--         pure True
+
+
+getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe (WithId RecordSubmissionPolicyId RecordSubmissionPolicy))
+getSubmissionPolicy authToken variant = do
+  mEditor <- verifyEditorhood authToken
+  case mEditor of
+    Nothing -> pure Nothing
+    Just _ -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
-        now <- liftIO getCurrentTime
-        insert_ (StoredRecordSubmission userId now record)
-        pure True
+      flip runSqlPool systemEnvDatabase $ do
+        mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
+        case mPolicy of
+          Nothing -> do
+            warn' $ "No stored submission policy for variant: " <> T.pack (show variant)
+            pure Nothing
+          Just (Entity policyId policy) -> pure $ Just $ WithId policyId policy
 
 
-getSubmissionPolicy :: ContentRecordVariant -> SystemM (Maybe (Entity RecordSubmissionPolicy))
-getSubmissionPolicy variant = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  flip runSqlPool systemEnvDatabase $ do
-    mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
-    case mPolicy of
-      Nothing -> do
-        warn' $ "No stored submission policy for variant: " <> T.pack (show variant)
-        pure Nothing
-      ent -> pure ent
-
-
-isApprovedSubmission :: StoredRecordSubmissionId -> SystemM (Maybe Bool)
-isApprovedSubmission submissionId = do
+isApprovedSubmission :: AuthToken -> StoredRecordSubmissionId -> SystemM (Maybe Bool)
+isApprovedSubmission authToken submissionId = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   mVariant <- flip runSqlPool systemEnvDatabase $ do
     mSubmission <- get submissionId
@@ -135,10 +141,10 @@ isApprovedSubmission submissionId = do
   case mVariant of
     Nothing -> pure Nothing
     Just variant -> do
-      mPolicy <- getSubmissionPolicy variant
+      mPolicy <- getSubmissionPolicy authToken variant
       case mPolicy of
         Nothing -> pure Nothing
-        Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
+        Just (WithId policyId (RecordSubmissionPolicy _ additional)) -> do
           flip runSqlPool systemEnvDatabase $ do
             assignees <- do
               as <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
@@ -154,9 +160,9 @@ isApprovedSubmission submissionId = do
                 else False
 
 
-integrateRecord :: StoredRecordSubmissionId -> SystemM Bool
-integrateRecord submissionId = do
-  mIsVerified <- isApprovedSubmission submissionId
+integrateRecord :: AuthToken -> StoredRecordSubmissionId -> SystemM Bool
+integrateRecord authToken submissionId = do
+  mIsVerified <- isApprovedSubmission authToken submissionId
   case mIsVerified of
     Nothing -> pure False
     Just isVerified
@@ -206,13 +212,13 @@ approveSubmission authToken submissionId = do
       case mVariant of
         Nothing -> pure False
         Just variant -> do
-          mPolicy <- getSubmissionPolicy variant
+          mPolicy <- getSubmissionPolicy authToken variant
           case mPolicy of
             Nothing -> pure False
             Just _ -> do
               flip runSqlPool systemEnvDatabase $
                 insert_ $ RecordSubmissionApproval submissionId editorId
-              void (integrateRecord submissionId)
+              void (integrateRecord authToken submissionId)
               pure True
 
 

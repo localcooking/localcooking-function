@@ -90,20 +90,20 @@ unsafeStoreMealTag tag = do
 -- * Safe Storage
 
 -- | As a content record submission
-saveTag :: StoredUserId -> TagRecord -> SystemM ()
-saveTag userId tag = do
+submitTag :: StoredUserId -> TagRecord -> SystemM ()
+submitTag userId tag = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   flip runSqlPool systemEnvDatabase $ do
     now <- liftIO getCurrentTime
     insert_ (StoredRecordSubmission userId now (TagRecord tag))
 
 
-saveChefTag :: StoredUserId -> ChefTag -> SystemM ()
-saveChefTag userId = saveTag userId . TagRecordChef
+submitChefTag :: StoredUserId -> ChefTag -> SystemM ()
+submitChefTag userId = submitTag userId . TagRecordChef
 
 
-saveMealTag :: StoredUserId -> MealTag -> SystemM ()
-saveMealTag userId = saveTag userId . TagRecordMeal
+submitMealTag :: StoredUserId -> MealTag -> SystemM ()
+submitMealTag userId = submitTag userId . TagRecordMeal
 
 
 -- * Search
