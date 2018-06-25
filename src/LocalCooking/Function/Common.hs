@@ -18,7 +18,7 @@ import LocalCooking.Database.Schema
     ( FacebookUserDetailsOwner, UniqueEmail, UniqueFacebookUserId
     )
   , EntityField
-    ( StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword
+    ( StoredUserEmail, StoredUserConfirmed, StoredUserPassword
     , UserRoleStoredUserRoleOwner
     )
   , StoredUser (..), StoredUserId
@@ -34,20 +34,17 @@ import Google.Keys
   , googleReCaptchaVerifyURI)
 
 import Data.URI (printURI)
-import Data.IORef (newIORef, readIORef, modifyIORef)
-import qualified Data.Set as Set
 import Data.Monoid ((<>))
 import Data.Time (getCurrentTime)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Aeson as Aeson
-import Control.Monad (forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Concurrent.STM (atomically)
 import Control.Logging (log')
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, update, get)
+import Database.Persist.Class (selectList, getBy, insert, insert_, deleteBy, update, get)
 import Network.HTTP.Client (httpLbs, method, responseBody, urlEncodedBody, parseRequest)
 
 

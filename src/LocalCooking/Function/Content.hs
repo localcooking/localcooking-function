@@ -8,15 +8,13 @@
 module LocalCooking.Function.Content where
 
 import LocalCooking.Function.Tag (unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag, unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag)
-import LocalCooking.Function.Chef (unsafeSetChef)
+import LocalCooking.Function.Chef (unsafeSetChef, unsafeNewMenu, unsafeSetMenu, unsafeNewMeal, unsafeSetMeal)
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.Content (SetEditor (..), GetEditor (..))
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (..), TagRecord (..), ChefRecord (..)
   , contentRecordVariant, ContentRecordVariant)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
-import LocalCooking.Common.Tag.Meal (MealTag)
-import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema
   ( StoredEditor (..), StoredEditorId
@@ -44,19 +42,16 @@ import LocalCooking.Database.Schema.Content
   )
 
 import Data.Maybe (catMaybes)
-import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))
-import Data.Aeson.Types (typeMismatch)
 import Data.Time (getCurrentTime)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Monoid ((<>))
-import GHC.Generics (Generic)
-import Control.Monad (forM_, forM, void)
+import Control.Monad (forM, void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Logging (warn')
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, getBy, insert, insert_, update, get, delete)
+import Database.Persist.Class (selectList, getBy, insert_, update, get, delete)
 
 
 
@@ -186,6 +181,10 @@ integrateRecord submissionId = do
               TagRecordMeal mealTag             -> unsafeStoreMealTag mealTag
             ChefRecord chefRecord -> case chefRecord of
               ChefRecordChef getSetChef -> void $ unsafeSetChef userId getSetChef
+              ChefRecordNewMenu newMenu -> void $ unsafeNewMenu userId newMenu
+              ChefRecordSetMenu setMenu -> void $ unsafeSetMenu userId setMenu
+              ChefRecordNewMeal newMeal -> void $ unsafeNewMeal userId newMeal
+              ChefRecordSetMeal setMeal -> void $ unsafeSetMeal userId setMeal
           flip runSqlPool systemEnvDatabase $ delete submissionId
           pure True
 

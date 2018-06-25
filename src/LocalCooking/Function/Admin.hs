@@ -21,9 +21,7 @@ import LocalCooking.Database.Schema
   )
 import LocalCooking.Database.Schema.Content
   ( EntityField
-    ( RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor
-    , RecordSubmissionApprovalRecordSubmissionApprovalEditor
-    , RecordSubmissionPolicyRecordSubmissionPolicyAdditional
+    ( RecordSubmissionPolicyRecordSubmissionPolicyAdditional
     , RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy
     )
   , Unique
@@ -31,7 +29,6 @@ import LocalCooking.Database.Schema.Content
     )
   , RecordAssignedSubmissionPolicy (..)
   , RecordSubmissionPolicy (..)
-  , StoredRecordSubmission (..)
   )
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Admin))

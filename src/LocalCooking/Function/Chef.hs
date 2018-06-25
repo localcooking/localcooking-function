@@ -20,8 +20,6 @@ import LocalCooking.Semantics.Chef
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (ChefRecord), ChefRecord (..))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
-import LocalCooking.Common.Tag.Meal (MealTag)
-import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema
   ( StoredChef (..), StoredMenu (..), StoredMeal (..)
@@ -44,7 +42,6 @@ import LocalCooking.Database.Schema
     ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline
     , UniqueStoredMealTag, UniqueStoredChefTag
     )
-  , hasRole
   , getStoredIngredientTagId
   )
 import LocalCooking.Database.Schema.Content
@@ -52,10 +49,7 @@ import LocalCooking.Database.Schema.Content
   )
 
 import Data.Maybe (catMaybes)
-import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))
-import Data.Aeson.Types (typeMismatch)
 import Data.Time (getCurrentTime)
-import GHC.Generics (Generic)
 import Control.Monad (forM_, forM)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.), (=.))
@@ -192,7 +186,7 @@ newMenu authToken menu = do
   mChef <- getChefFromAuthToken authToken
   case mChef of
     Nothing -> pure False
-    Just (WithId chefId _) -> do
+    Just _ -> do
       mUserId <- getUserId authToken
       case mUserId of
         Nothing -> pure False
@@ -278,12 +272,11 @@ getMeals authToken menuId = do
                       , mealSettingsTags = tags
                       , mealSettingsPrice = price
                       }
-                    
 
 
-newMeal :: AuthToken -> WithId StoredMenuId MealSettings -> SystemM (Maybe StoredMealId)
-newMeal authToken (WithId menuId MealSettings{..}) = do
-  isAuthorized <- verifyChefhood authToken
+unsafeNewMeal :: StoredUserId -> WithId StoredMenuId MealSettings -> SystemM (Maybe StoredMealId)
+unsafeNewMeal userId (WithId menuId MealSettings{..}) = do
+  isAuthorized <- guardRole userId Chef
   if not isAuthorized
     then pure Nothing
     else do
@@ -315,9 +308,27 @@ newMeal authToken (WithId menuId MealSettings{..}) = do
             pure (Just mealId)
 
 
-setMeal :: AuthToken -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
-setMeal authToken (WithId menuId (WithId mealId MealSettings{..})) = do
+newMeal :: AuthToken -> WithId StoredMenuId MealSettings -> SystemM Bool
+newMeal authToken meal = do
   isAuthorized <- verifyChefhood authToken
+  if not isAuthorized
+    then pure False
+    else do
+      mUserId <- getUserId authToken
+      case mUserId of
+        Nothing -> pure False
+        Just userId -> do
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            now <- liftIO getCurrentTime
+            insert_ $ StoredRecordSubmission userId now $
+              ChefRecord $ ChefRecordNewMeal meal
+            pure True
+
+
+unsafeSetMeal :: StoredUserId -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
+unsafeSetMeal userId (WithId menuId (WithId mealId MealSettings{..})) = do
+  isAuthorized <- guardRole userId Chef
   if not isAuthorized
     then pure False
     else do
@@ -339,6 +350,24 @@ setMeal authToken (WithId menuId (WithId mealId MealSettings{..})) = do
               ]
             assignMealTags mealId mealSettingsTags
             assignMealIngredients mealId mealSettingsIngredients
+            pure True
+
+
+setMeal :: AuthToken -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
+setMeal authToken meal = do
+  isAuthorized <- verifyChefhood authToken
+  if not isAuthorized
+    then pure False
+    else do
+      mUserId <- getUserId authToken
+      case mUserId of
+        Nothing -> pure False
+        Just userId -> do
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            now <- liftIO getCurrentTime
+            insert_ $ StoredRecordSubmission userId now $
+              ChefRecord $ ChefRecordSetMeal meal
             pure True
 
 
