@@ -11,18 +11,21 @@ import LocalCooking.Function.Semantics
   ( getChefTags, getMealTags, getMenuTags, getMealIngredientsDiets
   , assignChefTags, assignMealTags, assignMenuTags, assignMealIngredients
   )
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+import LocalCooking.Function.System
+  (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Chef
   ( GetSetChef (..), MenuSettings (..), MealSettings (..)
   )
+import LocalCooking.Semantics.ContentRecord
+  ( ContentRecord (ChefRecord), ChefRecord (..))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema
   ( StoredChef (..), StoredMenu (..), StoredMeal (..)
-  , StoredChefId, StoredMenuId, StoredMealId
+  , StoredChefId, StoredMenuId, StoredMealId, StoredUserId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
   , MealIngredient (..)
   , EntityField
@@ -44,10 +47,14 @@ import LocalCooking.Database.Schema
   , hasRole
   , getStoredIngredientTagId
   )
+import LocalCooking.Database.Schema.Content
+  ( StoredRecordSubmission (..)
+  )
 
 import Data.Maybe (catMaybes)
 import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))
 import Data.Aeson.Types (typeMismatch)
+import Data.Time (getCurrentTime)
 import GHC.Generics (Generic)
 import Control.Monad (forM_, forM)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -82,40 +89,48 @@ getChef authToken = do
 
 
 
-setChef :: AuthToken -> GetSetChef -> SystemM (Maybe StoredChefId)
-setChef authToken GetSetChef{..} = do
+unsafeSetChef :: StoredUserId -> GetSetChef -> SystemM (Maybe StoredChefId)
+unsafeSetChef userId GetSetChef{..} = do
+  mChef <- getChefFromUserId userId
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  liftIO $ flip runSqlPool systemEnvDatabase $ case mChef of
+    Nothing -> do
+      chefId <- insert $ StoredChef
+        userId
+        getSetChefName
+        getSetChefPermalink
+        getSetChefBio
+        getSetChefImages
+        getSetChefAvatar
+      forM_ getSetChefTags $ \t -> do
+        mChefTagId <- getBy (UniqueStoredChefTag t)
+        case mChefTagId of
+          Nothing -> pure ()
+          Just (Entity chefTagId _) -> insert_ (ChefTagRelation chefId chefTagId)
+      pure (Just chefId)
+    Just (WithId chefId _) -> do
+      update chefId
+        [ StoredChefStoredChefName =. getSetChefName
+        , StoredChefStoredChefPermalink =. getSetChefPermalink
+        , StoredChefStoredChefBio =. getSetChefBio
+        , StoredChefStoredChefImages =. getSetChefImages
+        , StoredChefStoredChefAvatar =. getSetChefAvatar
+        ]
+      assignChefTags chefId getSetChefTags
+      pure (Just chefId)
+
+
+setChef :: AuthToken -> GetSetChef -> SystemM Bool
+setChef authToken getSetChef = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure Nothing
-    Just userId -> do
-      mChef <- getChefFromAuthToken authToken
-      case mChef of
-        Nothing -> liftIO $ flip runSqlPool systemEnvDatabase $ do
-          chefId <- insert $ StoredChef
-            userId
-            getSetChefName
-            getSetChefPermalink
-            getSetChefBio
-            getSetChefImages
-            getSetChefAvatar
-          forM_ getSetChefTags $ \t -> do
-            mChefTagId <- getBy (UniqueStoredChefTag t)
-            case mChefTagId of
-              Nothing -> pure ()
-              Just (Entity chefTagId _) -> insert_ (ChefTagRelation chefId chefTagId)
-          pure (Just chefId)
-        Just (WithId chefId _) -> do
-          liftIO $ flip runSqlPool systemEnvDatabase $ do
-            update chefId
-              [ StoredChefStoredChefName =. getSetChefName
-              , StoredChefStoredChefPermalink =. getSetChefPermalink
-              , StoredChefStoredChefBio =. getSetChefBio
-              , StoredChefStoredChefImages =. getSetChefImages
-              , StoredChefStoredChefAvatar =. getSetChefAvatar
-              ]
-            assignChefTags chefId getSetChefTags
-            pure (Just chefId)
+    Nothing -> pure False
+    Just userId -> liftIO $ flip runSqlPool systemEnvDatabase $ do
+      now <- liftIO getCurrentTime
+      insert_ $ StoredRecordSubmission userId now $
+        ChefRecord $ ChefRecordChef getSetChef
+      pure True
 
 
 getMenus :: AuthToken -> SystemM (Maybe [WithId StoredMenuId MenuSettings])
@@ -143,12 +158,11 @@ getMenus authToken = do
                     , menuSettingsImages = imgs
                     , menuSettingsTags = tags
                     }
-                    
 
 
-newMenu :: AuthToken -> MenuSettings -> SystemM (Maybe StoredMenuId)
-newMenu authToken MenuSettings{..} = do
-  mChef <- getChefFromAuthToken authToken
+unsafeNewMenu :: StoredUserId -> MenuSettings -> SystemM (Maybe StoredMenuId)
+unsafeNewMenu userId MenuSettings{..} = do
+  mChef <- getChefFromUserId userId
   case mChef of
     Nothing -> pure Nothing
     Just (WithId chefId _) -> do
@@ -173,9 +187,27 @@ newMenu authToken MenuSettings{..} = do
             pure (Just menuId)
 
 
-setMenu :: AuthToken -> WithId StoredMenuId MenuSettings -> SystemM Bool
-setMenu authToken (WithId menuId MenuSettings{..}) = do
-  isAuthorized <- verifyChefhood authToken
+newMenu :: AuthToken -> MenuSettings -> SystemM Bool
+newMenu authToken menu = do
+  mChef <- getChefFromAuthToken authToken
+  case mChef of
+    Nothing -> pure False
+    Just (WithId chefId _) -> do
+      mUserId <- getUserId authToken
+      case mUserId of
+        Nothing -> pure False
+        Just userId -> do
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            now <- liftIO getCurrentTime
+            insert_ $ StoredRecordSubmission userId now $
+              ChefRecord $ ChefRecordNewMenu menu
+            pure True
+
+
+unsafeSetMenu :: StoredUserId -> WithId StoredMenuId MenuSettings -> SystemM Bool
+unsafeSetMenu userId (WithId menuId MenuSettings{..}) = do
+  isAuthorized <- guardRole userId Chef
   if not isAuthorized
     then pure False
     else do
@@ -193,6 +225,24 @@ setMenu authToken (WithId menuId MenuSettings{..}) = do
               , StoredMenuStoredMenuImages =. menuSettingsImages
               ]
             assignMenuTags menuId menuSettingsTags
+            pure True
+
+
+setMenu :: AuthToken -> WithId StoredMenuId MenuSettings -> SystemM Bool
+setMenu authToken menu = do
+  isAuthorized <- verifyChefhood authToken
+  if not isAuthorized
+    then pure False
+    else do
+      mUserId <- getUserId authToken
+      case mUserId of
+        Nothing -> pure False
+        Just userId -> do
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            now <- liftIO getCurrentTime
+            insert_ $ StoredRecordSubmission userId now $
+              ChefRecord $ ChefRecordSetMenu menu
             pure True
 
 
@@ -299,20 +349,22 @@ verifyChefhood authToken = do
     Nothing -> pure False
     Just userId -> guardRole userId Chef
 
+getChefFromUserId :: StoredUserId -> SystemM (Maybe (WithId StoredChefId StoredChef))
+getChefFromUserId userId = do
+  isChef <- guardRole userId Chef
+  if not isChef
+    then pure Nothing
+    else do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      flip runSqlPool systemEnvDatabase $ do
+        mEnt <- getBy (UniqueChefOwner userId)
+        case mEnt of
+          Nothing -> pure Nothing
+          Just (Entity chefId chef) -> pure $ Just $ WithId chefId chef
 
 getChefFromAuthToken :: AuthToken -> SystemM (Maybe (WithId StoredChefId StoredChef))
 getChefFromAuthToken authToken = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing
-    Just userId -> do
-      isChef <- verifyChefhood authToken
-      if not isChef
-        then pure Nothing
-        else do
-          SystemEnv{systemEnvDatabase} <- getSystemEnv
-          flip runSqlPool systemEnvDatabase $ do
-            mEnt <- getBy (UniqueChefOwner userId)
-            case mEnt of
-              Nothing -> pure Nothing
-              Just (Entity chefId chef) -> pure $ Just $ WithId chefId chef
+    Just userId -> getChefFromUserId userId

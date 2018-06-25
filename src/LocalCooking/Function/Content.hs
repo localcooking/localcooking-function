@@ -8,10 +8,12 @@
 module LocalCooking.Function.Content where
 
 import LocalCooking.Function.Tag (unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag, unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag)
+import LocalCooking.Function.Chef (unsafeSetChef)
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.Content (SetEditor (..), GetEditor (..))
 import LocalCooking.Semantics.ContentRecord
-  (ContentRecord (TagRecord), TagRecord (..), contentRecordVariant, ContentRecordVariant)
+  ( ContentRecord (..), TagRecord (..), ChefRecord (..)
+  , contentRecordVariant, ContentRecordVariant)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
@@ -126,8 +128,8 @@ getSubmissionPolicy variant = do
       ent -> pure ent
 
 
-unsafeIsVerifiedSubmission :: StoredRecordSubmissionId -> SystemM (Maybe Bool)
-unsafeIsVerifiedSubmission submissionId = do
+isApprovedSubmission :: StoredRecordSubmissionId -> SystemM (Maybe Bool)
+isApprovedSubmission submissionId = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   mVariant <- flip runSqlPool systemEnvDatabase $ do
     mSubmission <- get submissionId
@@ -159,21 +161,21 @@ unsafeIsVerifiedSubmission submissionId = do
 
 integrateRecord :: StoredRecordSubmissionId -> SystemM Bool
 integrateRecord submissionId = do
-  mIsVerified <- unsafeIsVerifiedSubmission submissionId
+  mIsVerified <- isApprovedSubmission submissionId
   case mIsVerified of
     Nothing -> pure False
     Just isVerified
       | not isVerified -> pure False
       | otherwise -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
-      mRec <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+      mUserRec <- liftIO $ flip runSqlPool systemEnvDatabase $ do
         mSub <- get submissionId
         case mSub of
           Nothing -> pure Nothing
-          Just (StoredRecordSubmission _ _ record) -> pure (Just record)
-      case mRec of
+          Just (StoredRecordSubmission author _ record) -> pure $ Just (author, record)
+      case mUserRec of
         Nothing -> pure False
-        Just record -> do
+        Just (userId, record) -> do
           case record of
             TagRecord tagRecord -> case tagRecord of
               TagRecordChef chefTag             -> unsafeStoreChefTag chefTag
@@ -182,8 +184,9 @@ integrateRecord submissionId = do
               TagRecordFarm farmTag             -> unsafeStoreFarmTag farmTag
               TagRecordIngredient ingredientTag -> unsafeStoreIngredientTag ingredientTag
               TagRecordMeal mealTag             -> unsafeStoreMealTag mealTag
-          -- NOTE deletes stored submission
-          liftIO $ flip runSqlPool systemEnvDatabase $ delete submissionId
+            ChefRecord chefRecord -> case chefRecord of
+              ChefRecordChef getSetChef -> void $ unsafeSetChef userId getSetChef
+          flip runSqlPool systemEnvDatabase $ delete submissionId
           pure True
 
 

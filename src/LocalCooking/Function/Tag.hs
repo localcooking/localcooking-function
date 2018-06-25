@@ -10,12 +10,16 @@
 module LocalCooking.Function.Tag where
 
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
-import LocalCooking.Semantics.ContentRecord (ContentRecord (TagRecord), TagRecord)
+import LocalCooking.Semantics.ContentRecord
+  ( ContentRecord (TagRecord)
+  , TagRecord (TagRecordChef, TagRecordMeal)
+  )
 import LocalCooking.Database.Schema
   ( StoredChefTag (..), StoredCultureTag (..)
   , StoredDietTag (..), StoredFarmTag (..)
   , StoredIngredientTag (..), StoredMealTag (..)
-  , StoredUserId)
+  , StoredUserId
+  )
 import LocalCooking.Database.Schema.Content
   ( StoredRecordSubmission (..)
   )
@@ -86,12 +90,20 @@ unsafeStoreMealTag tag = do
 -- * Safe Storage
 
 -- | As a content record submission
-storeTag :: StoredUserId -> TagRecord -> SystemM ()
-storeTag userId tag = do
+saveTag :: StoredUserId -> TagRecord -> SystemM ()
+saveTag userId tag = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   flip runSqlPool systemEnvDatabase $ do
     now <- liftIO getCurrentTime
     insert_ (StoredRecordSubmission userId now (TagRecord tag))
+
+
+saveChefTag :: StoredUserId -> ChefTag -> SystemM ()
+saveChefTag userId = saveTag userId . TagRecordChef
+
+
+saveMealTag :: StoredUserId -> MealTag -> SystemM ()
+saveMealTag userId = saveTag userId . TagRecordMeal
 
 
 -- * Search
@@ -99,8 +111,10 @@ storeTag userId tag = do
 searchChefTags :: Text -> SystemM (Maybe [ChefTag])
 searchChefTags = searchGeneric (\(StoredChefTag x) -> x) "cheftags"
 
+
 searchMealTags :: Text -> SystemM (Maybe [MealTag])
 searchMealTags = searchGeneric (\(StoredMealTag x) -> x) "mealtags"
+
 
 -- TODO register different sphinx indicies for each tag, mount different http responses
 
