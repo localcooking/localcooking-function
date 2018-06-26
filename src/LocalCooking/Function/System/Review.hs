@@ -7,7 +7,9 @@ module LocalCooking.Function.System.Review where
 
 import LocalCooking.Database.Schema
   ( StoredChefId, StoredMealId, StoredReview (..)
-  , EntityField (StoredReviewStoredReviewChef, StoredReviewStoredReviewMeal)
+  , EntityField
+    ( StoredReviewChef, StoredReviewMeal
+    )
   )
 import LocalCooking.Common.Rating (Rating, ratingToRational, ratingFromRational)
 import LocalCooking.Semantics.Mitch (Review (..))
@@ -39,7 +41,7 @@ calculateThread db ReviewAccumulator{..} = forever $ do
   flip runSqlPool db $ do
     chefs <- selectList [] []
     forM_ chefs $ \(Entity chefId _) -> do
-      reviews <- selectList [StoredReviewStoredReviewChef ==. chefId] []
+      reviews <- selectList [StoredReviewChef ==. chefId] []
       let totalRating =
             let go (Entity _ (StoredReview _ _ _ _ rating _ _ _ _ )) acc =
                   (acc + ratingToRational rating) / 2
@@ -59,7 +61,7 @@ calculateThread db ReviewAccumulator{..} = forever $ do
 
     meals <- selectList [] []
     forM_ meals $ \(Entity mealId _) -> do
-      reviews <- selectList [StoredReviewStoredReviewMeal ==. mealId] []
+      reviews <- selectList [StoredReviewMeal ==. mealId] []
       let totalRating =
             let go (Entity _ (StoredReview _ _ _ _ rating _ _ _ _)) acc =
                   (acc + ratingToRational rating) / 2

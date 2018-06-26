@@ -10,7 +10,7 @@
 module LocalCooking.Function.Tag where
 
 import LocalCooking.Function.System
-  (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+  (SystemM, SystemEnv (..), getUserId, getSystemEnv)
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (TagRecord), contentRecordVariant
   , TagRecord (TagRecordChef, TagRecordMeal)
@@ -19,7 +19,6 @@ import LocalCooking.Database.Schema
   ( StoredChefTag (..), StoredCultureTag (..)
   , StoredDietTag (..), StoredFarmTag (..)
   , StoredIngredientTag (..), StoredMealTag (..)
-  , StoredUserId
   )
 import LocalCooking.Database.Schema.Content
   ( StoredRecordSubmission (..)
@@ -46,7 +45,7 @@ import Text.Search.Sphinx.Types
 import Text.Search.Sphinx.Configuration (Configuration (mode, port, limit))
 import Database.Persist (PersistEntity (PersistEntityBackend), ToBackendKey)
 import Database.Persist.Sql (runSqlPool, toSqlKey, SqlBackend)
-import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, get)
+import Database.Persist.Class (get, insert_, get)
 
 
 

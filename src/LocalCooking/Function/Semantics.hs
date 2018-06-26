@@ -19,12 +19,12 @@ import LocalCooking.Database.Schema
   , StoredMealTag (..), StoredChefTag (..)
   , StoredMealTagId, StoredChefTagId
   , EntityField
-    ( StoredDietPreferenceDietPreferenceOwner
-    , StoredAllergyAllergy, StoredAllergyAllergyOwner
-    , MenuTagRelationMenuTagMenu
-    , ChefTagRelationChefTagChef
-    , MealTagRelationMealTagMeal
-    , MealIngredientMealIngredientMeal
+    ( StoredDietPreferenceOwner
+    , StoredAllergyOwner
+    , MenuTagRelationMenu
+    , ChefTagRelationChef
+    , MealTagRelationMeal
+    , MealIngredientMeal
     )
   , Unique
     ( UniqueStoredMealTag, UniqueStoredChefTag, UniqueMealIngredient
@@ -37,10 +37,9 @@ import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
 import Control.Monad (forM, forM_)
 import Control.Monad.Reader (ReaderT)
-import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.))
-import Database.Persist.Sql (runSqlPool, ConnectionPool, SqlBackend)
-import Database.Persist.Class (selectList, get, getBy, insert_, deleteBy, deleteWhere)
+import Database.Persist.Sql (SqlBackend)
+import Database.Persist.Class (selectList, get, getBy, insert_, deleteBy)
 
 
 
@@ -51,7 +50,7 @@ getMealIngredientsDiets mealId = do
   case mMeal of
     Nothing -> pure Nothing
     Just _ -> do
-      xs <- selectList [MealIngredientMealIngredientMeal ==. mealId] []
+      xs <- selectList [MealIngredientMeal ==. mealId] []
       ( ings
         , ds :: [Set.Set DietTag]
         ) <- fmap (unzip . catMaybes) $ forM xs $ \(Entity _ (MealIngredient _ ingId)) -> do
@@ -73,7 +72,7 @@ getMealTags mealId = do
   case mEnt of
     Nothing -> pure Nothing
     Just _ -> do
-      xs <- selectList [MealTagRelationMealTagMeal ==. mealId] []
+      xs <- selectList [MealTagRelationMeal ==. mealId] []
       fmap (Just . catMaybes) $ forM xs $ \(Entity _ (MealTagRelation _ tagId)) -> do
         mStoredTag <- get tagId
         case mStoredTag of
@@ -87,7 +86,7 @@ getMenuTags menuId = do
   case mEnt of
     Nothing -> pure Nothing
     Just _ -> do
-      xs <- selectList [MenuTagRelationMenuTagMenu ==. menuId] []
+      xs <- selectList [MenuTagRelationMenu ==. menuId] []
       fmap (Just . catMaybes) $ forM xs $ \(Entity _ (MenuTagRelation _ tagId)) -> do
         mStoredTag <- get tagId
         case mStoredTag of
@@ -101,7 +100,7 @@ getChefTags chefId = do
   case mEnt of
     Nothing -> pure Nothing
     Just _ -> do
-      xs <- selectList [ChefTagRelationChefTagChef ==. chefId] []
+      xs <- selectList [ChefTagRelationChef ==. chefId] []
       fmap (Just . catMaybes) $ forM xs $ \(Entity _ (ChefTagRelation _ tagId)) -> do
         mStoredTag <- get tagId
         case mStoredTag of
@@ -113,7 +112,7 @@ getChefTags chefId = do
 assignChefTags :: StoredChefId -> [ChefTag] -> ReaderT SqlBackend IO ()
 assignChefTags chefId chefSettingsTags = do
   oldTags <- fmap (fmap (\(Entity _ (ChefTagRelation _ t)) -> t))
-            $ selectList [ChefTagRelationChefTagChef ==. chefId] []
+            $ selectList [ChefTagRelationChef ==. chefId] []
   newTags <- fmap catMaybes $ forM chefSettingsTags $ \t -> do
     mStoredTag <- getBy (UniqueStoredChefTag t)
     case mStoredTag of
@@ -134,7 +133,7 @@ assignChefTags chefId chefSettingsTags = do
 assignMenuTags :: StoredMenuId -> [MealTag] -> ReaderT SqlBackend IO ()
 assignMenuTags menuId menuSettingsTags = do
   oldTags <- fmap (fmap (\(Entity _ (MenuTagRelation _ t)) -> t))
-            $ selectList [MenuTagRelationMenuTagMenu ==. menuId] []
+            $ selectList [MenuTagRelationMenu ==. menuId] []
   newTags <- fmap catMaybes $ forM menuSettingsTags $ \t -> do
     mStoredTag <- getBy (UniqueStoredMealTag t)
     case mStoredTag of
@@ -154,7 +153,7 @@ assignMenuTags menuId menuSettingsTags = do
 assignMealTags :: StoredMealId -> [MealTag] -> ReaderT SqlBackend IO ()
 assignMealTags mealId mealSettingsTags = do
   oldTags <- fmap (fmap (\(Entity _ (MealTagRelation _ t)) -> t))
-            $ selectList [MealTagRelationMealTagMeal ==. mealId] []
+            $ selectList [MealTagRelationMeal ==. mealId] []
   newTags <- fmap catMaybes $ forM mealSettingsTags $ \t -> do
     mStoredTag <- getBy (UniqueStoredMealTag t)
     case mStoredTag of
@@ -175,7 +174,7 @@ assignMealTags mealId mealSettingsTags = do
 assignMealIngredients :: StoredMealId -> [IngredientTag] -> ReaderT SqlBackend IO ()
 assignMealIngredients mealId mealSettingsIngredients = do
   oldIngs <- fmap (fmap (\(Entity _ (MealIngredient _ t)) -> t))
-            $ selectList [MealIngredientMealIngredientMeal ==. mealId] []
+            $ selectList [MealIngredientMeal ==. mealId] []
   newIngs <- fmap catMaybes $ forM mealSettingsIngredients $ \t ->
               getStoredIngredientTagId t
 
@@ -191,7 +190,7 @@ assignMealIngredients mealId mealSettingsIngredients = do
 assignDiets :: StoredCustomerId -> [DietTag] -> ReaderT SqlBackend IO ()
 assignDiets custId customerDiets = do
   oldDiets <- fmap (fmap (\(Entity _ (StoredDietPreference _ d)) -> d))
-            $ selectList [StoredDietPreferenceDietPreferenceOwner ==. custId] []
+            $ selectList [StoredDietPreferenceOwner ==. custId] []
   newDiets <- fmap catMaybes $ forM customerDiets $ \d ->
               getDietId d
   let toRemove = Set.fromList oldDiets `Set.difference` Set.fromList newDiets
@@ -209,14 +208,14 @@ getCustDiets custId = do
     Nothing -> pure Nothing
     Just _ -> do
       ds <- fmap (fmap (\(Entity _ (StoredDietPreference _ d)) -> d))
-          $ selectList [StoredDietPreferenceDietPreferenceOwner ==. custId] []
+          $ selectList [StoredDietPreferenceOwner ==. custId] []
       fmap (Just . catMaybes) $ forM ds getDietById
 
 
 assignAllergies :: StoredCustomerId -> [IngredientTag] -> ReaderT SqlBackend IO ()
 assignAllergies custId customerAllergies = do
   oldAllergys <- fmap (fmap (\(Entity _ (StoredAllergy _ d)) -> d))
-                $ selectList [StoredAllergyAllergyOwner ==. custId] []
+                $ selectList [StoredAllergyOwner ==. custId] []
   newAllergys <- fmap catMaybes $ forM customerAllergies $ \i ->
                   getStoredIngredientTagId i
   let toRemove = Set.fromList oldAllergys `Set.difference` Set.fromList newAllergys
@@ -232,5 +231,5 @@ getCustAllergies custId = do
     Nothing -> pure Nothing
     Just _ -> do
       ds <- fmap (fmap (\(Entity _ (StoredAllergy _ a)) -> a))
-          $ selectList [StoredAllergyAllergyOwner ==. custId] []
+          $ selectList [StoredAllergyOwner ==. custId] []
       fmap (Just . catMaybes) $ forM ds getIngredientTagById

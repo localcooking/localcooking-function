@@ -29,16 +29,16 @@ import LocalCooking.Database.Schema
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
   , MealIngredient (..)
   , EntityField
-    ( StoredChefStoredChefName, StoredChefStoredChefPermalink
-    , StoredChefStoredChefImages, StoredChefStoredChefAvatar
-    , StoredChefStoredChefBio
-    , StoredMenuStoredMenuAuthor, StoredMenuStoredMenuPublished
-    , StoredMenuStoredMenuDeadline, StoredMenuStoredMenuDescription
-    , StoredMenuStoredMenuHeading, StoredMenuStoredMenuImages
-    , StoredMealStoredMealMenu, StoredMealStoredMealDescription
-    , StoredMealStoredMealHeading, StoredMealStoredMealImages
-    , StoredMealStoredMealInstructions, StoredMealStoredMealPermalink
-    , StoredMealStoredMealPrice, StoredMealStoredMealTitle
+    ( StoredChefName, StoredChefPermalink
+    , StoredChefImages, StoredChefAvatar
+    , StoredChefBio
+    , StoredMenuAuthor, StoredMenuPublished
+    , StoredMenuDeadline, StoredMenuDescription
+    , StoredMenuHeading, StoredMenuImages
+    , StoredMealMenu, StoredMealDescription
+    , StoredMealHeading, StoredMealImages
+    , StoredMealInstructions, StoredMealPermalink
+    , StoredMealPrice, StoredMealTitle
     )
   , Unique
     ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline
@@ -106,11 +106,11 @@ unsafeSetChef userId GetSetChef{..} = do
       pure (Just chefId)
     Just (WithId chefId _) -> do
       update chefId
-        [ StoredChefStoredChefName =. getSetChefName
-        , StoredChefStoredChefPermalink =. getSetChefPermalink
-        , StoredChefStoredChefBio =. getSetChefBio
-        , StoredChefStoredChefImages =. getSetChefImages
-        , StoredChefStoredChefAvatar =. getSetChefAvatar
+        [ StoredChefName =. getSetChefName
+        , StoredChefPermalink =. getSetChefPermalink
+        , StoredChefBio =. getSetChefBio
+        , StoredChefImages =. getSetChefImages
+        , StoredChefAvatar =. getSetChefAvatar
         ]
       assignChefTags chefId getSetChefTags
       pure (Just chefId)
@@ -137,7 +137,7 @@ getMenus authToken = do
     Just (WithId chefId _) -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
-        xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
+        xs <- selectList [StoredMenuAuthor ==. chefId] []
         fmap (Just . catMaybes)
           $ forM xs $ \(Entity menuId (StoredMenu pub dead heading desc imgs _)) -> do
               mTags <- getMenuTags menuId
@@ -214,11 +214,11 @@ unsafeSetMenu userId (WithId menuId MenuSettings{..}) = do
           Nothing -> pure False
           _ -> do
             update menuId
-              [ StoredMenuStoredMenuPublished =. menuSettingsPublished
-              , StoredMenuStoredMenuDeadline =. menuSettingsDeadline
-              , StoredMenuStoredMenuHeading =. menuSettingsHeading
-              , StoredMenuStoredMenuDescription =. menuSettingsDescription
-              , StoredMenuStoredMenuImages =. menuSettingsImages
+              [ StoredMenuPublished =. menuSettingsPublished
+              , StoredMenuDeadline =. menuSettingsDeadline
+              , StoredMenuHeading =. menuSettingsHeading
+              , StoredMenuDescription =. menuSettingsDescription
+              , StoredMenuImages =. menuSettingsImages
               ]
             assignMenuTags menuId menuSettingsTags
             pure True
@@ -250,7 +250,7 @@ getMeals authToken menuId = do
     else do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
-        xs <- selectList [StoredMealStoredMealMenu ==. menuId] []
+        xs <- selectList [StoredMealMenu ==. menuId] []
         fmap (Just . catMaybes) $
           forM xs $ \(Entity mealId (StoredMeal title permalink _ heading desc inst imgs price)) -> do
             mTags <- getMealTags mealId
@@ -341,14 +341,14 @@ unsafeSetMeal userId (WithId menuId (WithId mealId MealSettings{..})) = do
           Nothing -> pure False
           _ -> do
             update mealId
-              [ StoredMealStoredMealTitle =. mealSettingsTitle
-              , StoredMealStoredMealPermalink =. mealSettingsPermalink
-              , StoredMealStoredMealMenu =. menuId
-              , StoredMealStoredMealHeading =. mealSettingsHeading
-              , StoredMealStoredMealDescription =. mealSettingsDescription
-              , StoredMealStoredMealInstructions =. mealSettingsInstructions
-              , StoredMealStoredMealImages =. mealSettingsImages
-              , StoredMealStoredMealPrice =. mealSettingsPrice
+              [ StoredMealTitle =. mealSettingsTitle
+              , StoredMealPermalink =. mealSettingsPermalink
+              , StoredMealMenu =. menuId
+              , StoredMealHeading =. mealSettingsHeading
+              , StoredMealDescription =. mealSettingsDescription
+              , StoredMealInstructions =. mealSettingsInstructions
+              , StoredMealImages =. mealSettingsImages
+              , StoredMealPrice =. mealSettingsPrice
               ]
             assignMealTags mealId mealSettingsTags
             assignMealIngredients mealId mealSettingsIngredients

@@ -14,26 +14,26 @@ import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.User.Role (UserRole (Chef))
-import LocalCooking.Database.Schema
-  ( StoredChef (..), StoredMenu (..), StoredMeal (..)
-  , StoredChefId, StoredMenuId, StoredMealId
-  , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
-  , MealIngredient (..)
-  , EntityField
-    ( StoredChefStoredChefName, StoredChefStoredChefPermalink
-    , StoredChefStoredChefImages, StoredChefStoredChefAvatar
-    , StoredChefStoredChefBio
-    , StoredMenuStoredMenuAuthor, StoredMenuStoredMenuPublished
-    , StoredMenuStoredMenuDeadline, StoredMenuStoredMenuDescription
-    , StoredMenuStoredMenuHeading, StoredMenuStoredMenuImages
-    , StoredMealStoredMealMenu, StoredMealStoredMealDescription
-    , StoredMealStoredMealHeading, StoredMealStoredMealImages
-    , StoredMealStoredMealInstructions, StoredMealStoredMealPermalink
-    , StoredMealStoredMealPrice, StoredMealStoredMealTitle
-    )
-  , Unique
-    ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline)
-  )
+-- import LocalCooking.Database.Schema
+--   ( StoredChef (..), StoredMenu (..), StoredMeal (..)
+--   , StoredChefId, StoredMenuId, StoredMealId
+--   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
+--   , MealIngredient (..)
+--   , EntityField
+--     ( StoredChefStoredChefName, StoredChefStoredChefPermalink
+--     , StoredChefStoredChefImages, StoredChefStoredChefAvatar
+--     , StoredChefStoredChefBio
+--     , StoredMenuStoredMenuAuthor, StoredMenuStoredMenuPublished
+--     , StoredMenuStoredMenuDeadline, StoredMenuStoredMenuDescription
+--     , StoredMenuStoredMenuHeading, StoredMenuStoredMenuImages
+--     , StoredMealStoredMealMenu, StoredMealStoredMealDescription
+--     , StoredMealStoredMealHeading, StoredMealStoredMealImages
+--     , StoredMealStoredMealInstructions, StoredMealStoredMealPermalink
+--     , StoredMealStoredMealPrice, StoredMealStoredMealTitle
+--     )
+--   , Unique
+--     ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline)
+--   )
 
 import Data.Maybe (catMaybes)
 import Data.Aeson (ToJSON (..), FromJSON (..), (.=), object, (.:), Value (Object))

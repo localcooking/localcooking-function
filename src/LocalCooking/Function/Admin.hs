@@ -11,18 +11,18 @@ import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRo
 import LocalCooking.Database.Schema
   ( FacebookUserDetails (..)
   , StoredUser (..)
-  , EntityField
-    ( StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword
-    , UserRoleStoredUserRoleOwner
-    )
-  , Unique (UniqueEmail, FacebookUserDetailsOwner)
   , UserRoleStored (..)
   , StoredEditorId
+  , EntityField
+    ( StoredUserEmail, StoredUserCreated, StoredUserConfirmed, StoredUserPassword
+    , UserRoleStoredOwner
+    )
+  , Unique (UniqueEmail, UniqueFacebookUserDetailsOwner)
   )
 import LocalCooking.Database.Schema.Content
   ( EntityField
-    ( RecordSubmissionPolicyRecordSubmissionPolicyAdditional
-    , RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy
+    ( RecordSubmissionPolicyAdditional
+    , RecordAssignedSubmissionPolicyPolicy
     )
   , Unique
     ( UniqueSubmissionPolicyVariant
@@ -57,8 +57,8 @@ getUsers authToken = do
         xs <- selectList [] []
         fmap Just $ forM xs $ \(Entity k (StoredUser created email _ conf)) -> do
           roles <- fmap (fmap (\(Entity _ (UserRoleStored r _)) -> r))
-                $ selectList [UserRoleStoredUserRoleOwner ==. k] []
-          mFb <- getBy (FacebookUserDetailsOwner k)
+                $ selectList [UserRoleStoredOwner ==. k] []
+          mFb <- getBy (UniqueFacebookUserDetailsOwner k)
           pure User
             { userId = k
             , userCreated = created
@@ -100,9 +100,9 @@ setUser authToken x = do
             case userSocialLogin of
               SocialLoginForm mFb -> do
                 case mFb of
-                  Nothing -> deleteBy (FacebookUserDetailsOwner userId)
+                  Nothing -> deleteBy (UniqueFacebookUserDetailsOwner userId)
                   Just userFb -> insert_ (FacebookUserDetails userFb userId)
-            xs <- selectList [UserRoleStoredUserRoleOwner ==. userId] []
+            xs <- selectList [UserRoleStoredOwner ==. userId] []
             rolesRef <- liftIO (newIORef (Set.fromList userRoles))
             forM_ xs $ \(Entity k (UserRoleStored role _)) -> do
               roles' <- liftIO (readIORef rolesRef)
@@ -157,7 +157,7 @@ getSubmissionPolicy authToken variant = do
           Nothing -> pure Nothing
           Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
             assigned <- do
-              xs <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
+              xs <- selectList [RecordAssignedSubmissionPolicyPolicy ==. policyId] []
               pure $ (\(Entity _ (RecordAssignedSubmissionPolicy _ entityId)) -> entityId) <$> xs
             pure $ Just $ GetSetSubmissionPolicy variant additional assigned
 
@@ -174,7 +174,7 @@ setSubmissionPolicy authToken (GetSetSubmissionPolicy variant additional assigne
         mEnt <- getBy (UniqueSubmissionPolicyVariant variant)
         void $ case mEnt of -- FIXME retain policyId?
           Just (Entity p _) -> do
-            update p [RecordSubmissionPolicyRecordSubmissionPolicyAdditional =. additional]
+            update p [RecordSubmissionPolicyAdditional =. additional]
             pure p
           Nothing -> do
             insert (RecordSubmissionPolicy variant additional)

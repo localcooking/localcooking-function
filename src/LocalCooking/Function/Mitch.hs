@@ -25,26 +25,23 @@ import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
 import LocalCooking.Common.Rating (Rating)
 import qualified LocalCooking.Common.User.Role as UserRole
-import LocalCooking.Common.Tag.Meal (MealTag)
-import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Database.Schema
   ( getIngredientByName, getMealId
   , StoredCustomer (..)
   , StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
   , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId, StoredOrderId
-  , StoredMealTag (..), StoredChefTag (..)
   , CartRelation (..)
   , EntityField
-    ( StoredMenuStoredMenuAuthor
-    , StoredOrderStoredOrderChef, StoredMenuStoredMenuDeadline
-    , StoredOrderStoredOrderMenu
-    , StoredOrderStoredOrderCustomer
-    , StoredOrderStoredOrderProgress, StoredOrderStoredOrderMeal
-    , StoredMealStoredMealMenu, StoredReviewStoredReviewMeal
-    , CartRelationCartRelationAdded, CartRelationCartRelationVolume
-    , CartRelationCartRelationCustomer
-    , StoredCustomerStoredCustomerAddress
-    , StoredCustomerStoredCustomerName
+    ( StoredMenuAuthor
+    , StoredOrderChef, StoredMenuDeadline
+    , StoredOrderMenu
+    , StoredOrderCustomer
+    , StoredOrderProgress, StoredOrderMeal
+    , StoredMealMenu, StoredReviewMeal
+    , CartRelationAdded, CartRelationVolume
+    , CartRelationCustomer
+    , StoredCustomerAddress
+    , StoredCustomerName
     )
   , Unique
     ( UniqueChefPermalink, UniqueMealPermalink
@@ -55,19 +52,16 @@ import LocalCooking.Database.Schema
 
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
-import qualified Data.Text as T
 import Data.Text.Permalink (Permalink)
 import Data.Text.Markdown (MarkdownText)
-import Data.Monoid ((<>))
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import Data.Image.Source (ImageSource)
 import Data.Time (getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
 import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Logging (log')
 import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
-import Database.Persist.Sql (runSqlPool, toSqlKey)
+import Database.Persist.Sql (runSqlPool)
 import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, count)
 
 
@@ -88,8 +82,8 @@ setCustomer authToken GetSetCustomer{..} = do
             pure True
           Just (Entity custId _) -> do
             update custId
-              [ StoredCustomerStoredCustomerName =. getSetCustomerName
-              , StoredCustomerStoredCustomerAddress =. getSetCustomerAddress
+              [ StoredCustomerName =. getSetCustomerName
+              , StoredCustomerAddress =. getSetCustomerAddress
               ]
             pure True
 
@@ -262,8 +256,8 @@ getMealSynopsis mealId = do
               Nothing -> pure Nothing
               Just (_,diets) -> do
                 orders <- count
-                  [ StoredOrderStoredOrderMeal ==. mealId
-                  , StoredOrderStoredOrderProgress !=. DeliveredProgress
+                  [ StoredOrderMeal ==. mealId
+                  , StoredOrderProgress !=. DeliveredProgress
                   ]
                 pure $ Just (title,permalink,heading,images,price,diets,orders,tags)
   case mCont of
@@ -299,7 +293,7 @@ getChefSynopsis chefId = do
         case mTags of
           Nothing -> pure Nothing
           Just tags -> do
-            orders <- count [StoredOrderStoredOrderChef ==. chefId]
+            orders <- count [StoredOrderChef ==. chefId]
             pure $ Just (name,permalink,avatar,tags,orders)
   case mStoredChef of
     Nothing -> pure Nothing
@@ -327,7 +321,7 @@ getChefMenuSynopses chefId = do
     case mChef of
       Nothing -> pure Nothing
       Just _ -> do
-        xs <- selectList [StoredMenuStoredMenuAuthor ==. chefId] []
+        xs <- selectList [StoredMenuAuthor ==. chefId] []
         fmap (Just . catMaybes) $ forM xs $ \(Entity menuId (StoredMenu published deadline heading _ images _)) ->
           case published of
             Nothing -> pure Nothing
@@ -353,7 +347,7 @@ getMenuMealSynopses menuId = do
     mMenu <- get menuId
     case mMenu of
       Nothing -> pure Nothing
-      Just _ -> Just <$> selectList [StoredMealStoredMealMenu ==. menuId] []
+      Just _ -> Just <$> selectList [StoredMealMenu ==. menuId] []
   case mXs of
     Nothing -> pure Nothing
     Just xs -> fmap (Just . catMaybes) $ forM xs $ \(Entity mealId _) ->
@@ -372,13 +366,13 @@ browseChef chefPermalink = do
         case mTags of
           Nothing -> pure Nothing
           Just tags -> do
-            totalOrders <- count [StoredOrderStoredOrderChef ==. chefId]
+            totalOrders <- count [StoredOrderChef ==. chefId]
             today <- utctDay <$> liftIO getCurrentTime
             activeOrders <- do
-              menus <- selectList [StoredMenuStoredMenuDeadline >=. today] []
+              menus <- selectList [StoredMenuDeadline >=. today] []
               countRef <- liftIO (newIORef 0)
               forM_ menus $ \(Entity menuId _) -> do
-                n <- count [StoredOrderStoredOrderMenu ==. menuId]
+                n <- count [StoredOrderMenu ==. menuId]
                 liftIO (modifyIORef countRef (+ n))
               liftIO (readIORef countRef)
             pure $ Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders)
@@ -469,12 +463,12 @@ browseMeal chefPermalink deadline mealPermalink = do
                       Nothing -> pure Nothing
                       Just tags -> do
                         orders <- count
-                          [ StoredOrderStoredOrderMeal ==. mealId
-                          , StoredOrderStoredOrderProgress !=. DeliveredProgress
+                          [ StoredOrderMeal ==. mealId
+                          , StoredOrderProgress !=. DeliveredProgress
                           ]
                         reviewIds <-
                           fmap (fmap (\(Entity reviewId _) -> reviewId)) $
-                            selectList [StoredReviewStoredReviewMeal ==. mealId] []
+                            selectList [StoredReviewMeal ==. mealId] []
                         mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
                         case mRating of
                           Nothing -> pure Nothing
@@ -511,7 +505,7 @@ getCart authToken = do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $
         fmap (Just . fmap (\(Entity _ (CartRelation _ mealId vol time)) -> CartEntry mealId vol time))
-          $ selectList [CartRelationCartRelationCustomer ==. userId] []
+          $ selectList [CartRelationCustomer ==. userId] []
 
 
 
@@ -534,8 +528,8 @@ addToCart authToken chefPermalink deadline mealPermalink vol = do
                 insert_ (CartRelation userId mealId vol now)
               Just (Entity cartId (CartRelation _ _ oldVol _)) ->
                 update cartId
-                  [ CartRelationCartRelationVolume =. (vol + oldVol)
-                  , CartRelationCartRelationAdded =. now
+                  [ CartRelationVolume =. (vol + oldVol)
+                  , CartRelationAdded =. now
                   ]
             pure True
 
@@ -553,7 +547,7 @@ getOrders authToken = do
         case mCust of
           Nothing -> pure Nothing
           Just (Entity custId _) ->
-            Just <$> selectList [StoredOrderStoredOrderCustomer ==. custId] []
+            Just <$> selectList [StoredOrderCustomer ==. custId] []
       case mXs of
         Nothing -> pure Nothing
         Just xs -> fmap (Just . catMaybes) $

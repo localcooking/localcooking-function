@@ -17,13 +17,13 @@ import LocalCooking.Semantics.Content
   )
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (..), TagRecord (..), ChefRecord (..)
-  , contentRecordVariant, ContentRecordVariant)
+  , ContentRecordVariant)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema
   ( StoredEditor (..), StoredEditorId
   , EntityField
-    ( StoredEditorStoredEditorName
+    ( StoredEditorName
     )
   , Unique
     ( UniqueEditor
@@ -34,20 +34,19 @@ import LocalCooking.Database.Schema.Content
     ( UniqueSubmissionPolicyVariant
     )
   , EntityField
-    ( RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor
-    , RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy
-    , RecordSubmissionApprovalRecordSubmissionApprovalEditor
-    , RecordSubmissionApprovalRecordSubmissionApprovalRecord
-    , StoredRecordSubmissionStoredRecordSubmissionVariant
+    ( RecordAssignedSubmissionPolicyEditor
+    , RecordAssignedSubmissionPolicyPolicy
+    , RecordSubmissionApprovalEditor
+    , RecordSubmissionApprovalRecord
+    , StoredRecordSubmissionVariant
     )
   , RecordAssignedSubmissionPolicy (..)
-  , RecordSubmissionPolicy (..), RecordSubmissionPolicyId
+  , RecordSubmissionPolicy (..)
   , StoredRecordSubmission (..), StoredRecordSubmissionId
   , RecordSubmissionApproval (..)
   )
 
 import Data.Maybe (catMaybes)
-import Data.Time (getCurrentTime)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Monoid ((<>))
@@ -74,7 +73,7 @@ setEditor authToken SetEditor{..} = do
           Nothing -> do
             insert_ (StoredEditor userId setEditorName)
           Just (Entity editorId _) ->
-            update editorId [StoredEditorStoredEditorName =. setEditorName]
+            update editorId [StoredEditorName =. setEditorName]
         pure True
 
 
@@ -91,14 +90,14 @@ getEditor authToken = do
           Nothing -> pure Nothing
           Just (Entity editorId (StoredEditor _ name)) -> do
             variants <- do
-              xs <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicyEditor ==. editorId] []
+              xs <- selectList [RecordAssignedSubmissionPolicyEditor ==. editorId] []
               fmap catMaybes $ forM xs $ \(Entity _ (RecordAssignedSubmissionPolicy policyId _)) -> do
                 mPolicy <- get policyId
                 case mPolicy of
                   Nothing -> pure Nothing
                   Just (RecordSubmissionPolicy v _) -> pure (Just v)
             approved <- do
-              xs <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalEditor ==. editorId] []
+              xs <- selectList [RecordSubmissionApprovalEditor ==. editorId] []
               forM xs $ \(Entity approvalId _) -> pure approvalId
             pure $ Just $ GetEditor name variants approved
 
@@ -119,7 +118,7 @@ getSubmissionPolicy authToken variant = do
             pure Nothing
           Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
             assigned <- do
-              xs <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
+              xs <- selectList [RecordAssignedSubmissionPolicyPolicy ==. policyId] []
               pure $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
             pure $ Just $ GetRecordSubmissionPolicy variant additional assigned
 
@@ -141,10 +140,10 @@ isApprovedSubmission authToken submissionId = do
               Nothing -> pure Nothing
               Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
                 assignees <- do
-                  xs <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
+                  xs <- selectList [RecordAssignedSubmissionPolicyPolicy ==. policyId] []
                   pure $ Set.fromList $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
                 approved <- do
-                  as <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalRecord ==. submissionId] []
+                  as <- selectList [RecordSubmissionApprovalRecord ==. submissionId] []
                   pure $ Set.fromList $ (\(Entity _ (RecordSubmissionApproval _ editor)) -> editor) <$> as
                 let needingApproval = assignees `Set.difference` approved
                     extraApproval = approved `Set.difference` assignees
@@ -198,10 +197,10 @@ getSubmissions authToken variant = do
     Just _ -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
-        xs <- selectList [StoredRecordSubmissionStoredRecordSubmissionVariant ==. variant] []
+        xs <- selectList [StoredRecordSubmissionVariant ==. variant] []
         fmap Just $ forM xs $ \(Entity submissionId (StoredRecordSubmission author timestamp content _)) -> do
           approvals <- do
-            ys <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalRecord ==. submissionId] []
+            ys <- selectList [RecordSubmissionApprovalRecord ==. submissionId] []
             pure $ (\(Entity _ (RecordSubmissionApproval _ e)) -> e) <$> ys
           pure $ WithId submissionId $ GetRecordSubmission author timestamp content approvals
 

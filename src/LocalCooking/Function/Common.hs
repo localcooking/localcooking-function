@@ -15,11 +15,11 @@ import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.AccessToken.Email (EmailToken)
 import LocalCooking.Database.Schema
   ( Unique
-    ( FacebookUserDetailsOwner, UniqueEmail, UniqueFacebookUserId
+    ( UniqueFacebookUserDetailsOwner, UniqueEmail, UniqueFacebookUserId
     )
   , EntityField
     ( StoredUserEmail, StoredUserConfirmed, StoredUserPassword
-    , UserRoleStoredUserRoleOwner
+    , UserRoleStoredOwner
     )
   , StoredUser (..), StoredUserId
   , FacebookUserAccessTokenStored (..)
@@ -220,8 +220,8 @@ getUser authToken = do
               Nothing -> pure Nothing
               Just (StoredUser created email _ conf) -> do
                 roles <- fmap (fmap (\(Entity _ (UserRoleStored r _)) -> r))
-                      $ selectList [UserRoleStoredUserRoleOwner ==. k] []
-                mFb <- getBy (FacebookUserDetailsOwner k)
+                      $ selectList [UserRoleStoredOwner ==. k] []
+                mFb <- getBy (UniqueFacebookUserDetailsOwner k)
                 pure $ Just User
                   { userId = k
                   , userCreated = created
@@ -264,7 +264,7 @@ setUser authToken SetUser{..} = do
                       case setUserSocialLogin of
                         SocialLoginForm mFb -> do
                           case mFb of
-                            Nothing -> deleteBy (FacebookUserDetailsOwner setUserId)
+                            Nothing -> deleteBy (UniqueFacebookUserDetailsOwner setUserId)
                             Just userFb -> insert_ (FacebookUserDetails userFb setUserId)
                       pure True
 
