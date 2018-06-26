@@ -104,7 +104,7 @@ getEditor authToken = do
 
 
 
-getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe (WithId RecordSubmissionPolicyId GetRecordSubmissionPolicy))
+getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe GetRecordSubmissionPolicy)
 getSubmissionPolicy authToken variant = do
   mEditor <- verifyEditorhood authToken
   case mEditor of
@@ -117,41 +117,41 @@ getSubmissionPolicy authToken variant = do
           Nothing -> do
             warn' $ "No stored submission policy for variant: " <> T.pack (show variant)
             pure Nothing
-          Just (Entity policyId (RecordSubmissionPolicy variant additional)) -> do
+          Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
             assigned <- do
               xs <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
               pure $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
-            pure $ Just $ WithId policyId $
-              GetRecordSubmissionPolicy variant additional assigned
+            pure $ Just $ GetRecordSubmissionPolicy variant additional assigned
 
 
 isApprovedSubmission :: AuthToken -> StoredRecordSubmissionId -> SystemM (Maybe Bool)
 isApprovedSubmission authToken submissionId = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  mVariant <- flip runSqlPool systemEnvDatabase $ do
-    mSubmission <- get submissionId
-    case mSubmission of
-      Nothing -> pure Nothing
-      Just (StoredRecordSubmission _ _ _ variant) -> do
-        pure $ Just variant
-  case mVariant of
+  mEditor <- verifyEditorhood authToken
+  case mEditor of
     Nothing -> pure Nothing
-    Just variant -> do
-      mPolicy <- getSubmissionPolicy authToken variant
-      case mPolicy of
-        Nothing -> pure Nothing
-        Just (WithId policyId (GetRecordSubmissionPolicy _ additional assigned)) -> do
-          flip runSqlPool systemEnvDatabase $ do
-            let assignees = Set.fromList assigned
-            approved <- do
-              as <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalRecord ==. submissionId] []
-              pure $ Set.fromList $ (\(Entity _ (RecordSubmissionApproval _ editor)) -> editor) <$> as
-            let needingApproval = assignees `Set.difference` approved
-                extraApproval = approved `Set.difference` assignees
-            pure $ Just $
-              if Set.null needingApproval
-                then Set.size extraApproval >= additional
-                else False
+    Just _ -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mSubmission <- get submissionId
+        case mSubmission of
+          Nothing -> pure Nothing
+          Just (StoredRecordSubmission _ _ _ variant) -> do
+            mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
+            case mPolicy of
+              Nothing -> pure Nothing
+              Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
+                assignees <- do
+                  xs <- selectList [RecordAssignedSubmissionPolicyRecordAssignedSubmissionPolicy ==. policyId] []
+                  pure $ Set.fromList $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
+                approved <- do
+                  as <- selectList [RecordSubmissionApprovalRecordSubmissionApprovalRecord ==. submissionId] []
+                  pure $ Set.fromList $ (\(Entity _ (RecordSubmissionApproval _ editor)) -> editor) <$> as
+                let needingApproval = assignees `Set.difference` approved
+                    extraApproval = approved `Set.difference` assignees
+                pure $ Just $
+                  if Set.null needingApproval
+                    then Set.size extraApproval >= additional
+                    else False
 
 
 integrateRecord :: AuthToken -> StoredRecordSubmissionId -> SystemM Bool
