@@ -13,7 +13,7 @@ import LocalCooking.Function.System
   (SystemM, SystemEnv (..), getUserId, getSystemEnv)
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (TagRecord), contentRecordVariant
-  , TagRecord (TagRecordChef, TagRecordMeal)
+  , TagRecord (..)
   )
 import LocalCooking.Database.Schema
   ( StoredChefTag (..), StoredCultureTag (..)
@@ -108,6 +108,17 @@ submitTag token tag = do
 submitChefTag :: AuthToken -> ChefTag -> SystemM Bool
 submitChefTag token = submitTag token . TagRecordChef
 
+submitCultureTag :: AuthToken -> CultureTag -> SystemM Bool
+submitCultureTag token = submitTag token . TagRecordCulture
+
+submitDietTag :: AuthToken -> DietTag -> SystemM Bool
+submitDietTag token = submitTag token . TagRecordDiet
+
+submitFarmTag :: AuthToken -> FarmTag -> SystemM Bool
+submitFarmTag token = submitTag token . TagRecordFarm
+
+submitIngredientTag :: AuthToken -> IngredientTag -> SystemM Bool
+submitIngredientTag token = submitTag token . TagRecordIngredient
 
 submitMealTag :: AuthToken -> MealTag -> SystemM Bool
 submitMealTag token = submitTag token . TagRecordMeal
@@ -118,6 +129,17 @@ submitMealTag token = submitTag token . TagRecordMeal
 searchChefTags :: Text -> SystemM (Maybe [ChefTag])
 searchChefTags = searchGeneric (\(StoredChefTag x) -> x) "cheftags"
 
+searchCultureTags :: Text -> SystemM (Maybe [CultureTag])
+searchCultureTags = searchGeneric (\(StoredCultureTag x) -> x) "culturetags"
+
+searchDietTags :: Text -> SystemM (Maybe [DietTag])
+searchDietTags = searchGeneric (\(StoredDietTag x) -> x) "diettags"
+
+searchFarmTags :: Text -> SystemM (Maybe [FarmTag])
+searchFarmTags = searchGeneric (\(StoredFarmTag x) -> x) "farmtags"
+
+searchIngredientTags :: Text -> SystemM (Maybe [IngredientTag])
+searchIngredientTags = searchGeneric (\(StoredIngredientTag x) -> x) "ingredienttags"
 
 searchMealTags :: Text -> SystemM (Maybe [MealTag])
 searchMealTags = searchGeneric (\(StoredMealTag x) -> x) "mealtags"
