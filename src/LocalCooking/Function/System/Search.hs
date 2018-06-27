@@ -5,10 +5,16 @@
 
 module LocalCooking.Function.System.Search where
 
-import LocalCooking.Common.Tag.Meal (MealTag (..))
 import LocalCooking.Common.Tag.Chef (ChefTag (..))
+import LocalCooking.Common.Tag.Culture (CultureTag (..))
+import LocalCooking.Common.Tag.Diet (DietTag (..))
+import LocalCooking.Common.Tag.Farm (FarmTag (..))
+import LocalCooking.Common.Tag.Ingredient (IngredientTag (..))
+import LocalCooking.Common.Tag.Meal (MealTag (..))
 import LocalCooking.Common.Tag (Tag (..))
-import LocalCooking.Database.Schema (StoredMealTag (..), StoredChefTag (..))
+import LocalCooking.Database.Schema
+  ( StoredMealTag (..), StoredChefTag (..), StoredCultureTag (..), StoredDietTag (..), StoredFarmTag (..), StoredIngredientTag (..)
+  )
 
 import Data.Default (def)
 import Data.Text (Text)
@@ -44,17 +50,6 @@ sphinxDocumentHTTPStream doc backend chunk flush =
 
 -- TODO different documents for other tags, compiled search techniques
 
-mealTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
-mealTagsDocument = do
-  mapM_ yield startEvents
-  selectSource [] []
-    .| CL.concatMap
-         ( extractEntityToXMLEvent
-           (\(StoredMealTag (MealTag (Tag x))) -> x)
-         )
-  mapM_ yield endEvents
-
-
 chefTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
 chefTagsDocument = do
   mapM_ yield startEvents
@@ -62,6 +57,61 @@ chefTagsDocument = do
     .| CL.concatMap
          ( extractEntityToXMLEvent
            (\(StoredChefTag (ChefTag (Tag x))) -> x)
+         )
+  mapM_ yield endEvents
+
+
+cultureTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
+cultureTagsDocument = do
+  mapM_ yield startEvents
+  selectSource [] []
+    .| CL.concatMap
+         ( extractEntityToXMLEvent
+           (\(StoredCultureTag (CultureTag (Tag x))) -> x)
+         )
+  mapM_ yield endEvents
+
+
+dietTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
+dietTagsDocument = do
+  mapM_ yield startEvents
+  selectSource [] []
+    .| CL.concatMap
+         ( extractEntityToXMLEvent
+           (\(StoredDietTag (DietTag (Tag x))) -> x)
+         )
+  mapM_ yield endEvents
+
+
+farmTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
+farmTagsDocument = do
+  mapM_ yield startEvents
+  selectSource [] []
+    .| CL.concatMap
+         ( extractEntityToXMLEvent
+           (\(StoredFarmTag (FarmTag (Tag x))) -> x)
+         )
+  mapM_ yield endEvents
+
+
+ingredientTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
+ingredientTagsDocument = do
+  mapM_ yield startEvents
+  selectSource [] []
+    .| CL.concatMap
+         ( extractEntityToXMLEvent
+           (\(StoredIngredientTag (IngredientTag (Tag x))) -> x)
+         )
+  mapM_ yield endEvents
+
+
+mealTagsDocument :: ConduitT () XML.Event (ReaderT SqlBackend (ResourceT IO)) ()
+mealTagsDocument = do
+  mapM_ yield startEvents
+  selectSource [] []
+    .| CL.concatMap
+         ( extractEntityToXMLEvent
+           (\(StoredMealTag (MealTag (Tag x))) -> x)
          )
   mapM_ yield endEvents
 
