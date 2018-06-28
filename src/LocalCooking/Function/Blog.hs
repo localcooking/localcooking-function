@@ -10,14 +10,14 @@ module LocalCooking.Function.Blog where
 import LocalCooking.Function.System
   (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.Blog
-  ( GetBlogPost (..), NewBlogPost (..), SetBlogPost (..)
+  ( GetBlogPost (..), NewBlogPost (..), SetBlogPost (..), BlogPostSynopsis (..)
   )
 import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema
-  ( StoredBlogPost (..), StoredBlogPostId
-  , Unique (UniqueBlogPost)
+  ( StoredBlogPost (..), StoredBlogPostId, StoredEditor (..)
+  , Unique (UniqueBlogPost, UniqueEditor)
   , EntityField
     ( StoredBlogPostHeadline, StoredBlogPostPermalink, StoredBlogPostContent)
   )
@@ -40,8 +40,12 @@ getBlogPost postId = do
     mPost <- getBy (UniqueBlogPost postId)
     case mPost of
       Nothing -> pure Nothing
-      Just (Entity _ (StoredBlogPost author timestamp headline permalink content)) ->
-        pure $ Just $ GetBlogPost author timestamp headline permalink content
+      Just (Entity _ (StoredBlogPost author timestamp headline permalink content)) -> do
+        mEditor <- getBy (UniqueEditor author)
+        case mEditor of
+          Nothing -> pure Nothing
+          Just (Entity _ (StoredEditor _ name)) ->
+            pure $ Just $ GetBlogPost name timestamp headline permalink content
 
 
 newBlogPost :: AuthToken -> NewBlogPost -> SystemM (Maybe StoredBlogPostId)
@@ -92,11 +96,14 @@ setBlogPost authToken (WithId postId SetBlogPost{..}) = do
                     pure True
 
 
-getBlogPosts :: SystemM [WithId StoredBlogPostId GetBlogPost]
+getBlogPosts :: SystemM [WithId StoredBlogPostId BlogPostSynopsis]
 getBlogPosts = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   flip runSqlPool systemEnvDatabase $ do
     xs <- selectList [] []
-    pure $ (\(Entity postId (StoredBlogPost a t h p c)) ->
-              WithId postId (GetBlogPost a t h p c)
-              ) <$> xs
+    fmap catMaybes $ forM xs $ \(Entity postId (StoredBlogPost a t h p _)) -> do
+      mEditor <- getBy (UniqueEditor a)
+      case mEditor of
+        Nothing -> pure Nothing
+        Just (Entity _ (StoredEditor _ name)) ->
+          pure $ Just $ WithId postId $ BlogPostSynopsis name t h p
