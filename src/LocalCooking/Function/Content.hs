@@ -8,16 +8,19 @@
 module LocalCooking.Function.Content where
 
 import LocalCooking.Function.Tag (unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag, unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag)
-import LocalCooking.Function.Chef (unsafeSetChef, unsafeNewMenu, unsafeSetMenu, unsafeNewMeal, unsafeSetMeal)
+import LocalCooking.Function.Chef
+  ( unsafeSetChef, unsafeNewMenu, unsafeSetMenu
+  , unsafeNewMeal, unsafeSetMeal, validateChef
+  )
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Content
-  ( SetEditor (..), GetEditor (..)
-  , GetRecordSubmissionPolicy (..), GetRecordSubmission (..)
-  )
+  ( SetEditor (..), GetRecordSubmissionPolicy (..))
+import LocalCooking.Semantics.Content.Approval
+  ( GetEditor (..), GetRecordSubmission (..))
 import LocalCooking.Semantics.ContentRecord
-  ( ContentRecord (..), TagRecord (..), ChefRecord (..)
-  , ContentRecordVariant)
+  ( ContentRecord (..), TagRecord (..), ChefRecord (..), ProfileRecord (..))
+import LocalCooking.Semantics.ContentRecord.Variant (ContentRecordVariant)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema
@@ -179,11 +182,16 @@ integrateRecord authToken submissionId = do
               TagRecordIngredient ingredientTag -> unsafeStoreIngredientTag ingredientTag
               TagRecordMeal mealTag             -> unsafeStoreMealTag mealTag
             ChefRecord chefRecord -> case chefRecord of
-              ChefRecordChef getSetChef -> void $ unsafeSetChef userId getSetChef
               ChefRecordNewMenu newMenu -> void $ unsafeNewMenu userId newMenu
               ChefRecordSetMenu setMenu -> void $ unsafeSetMenu userId setMenu
               ChefRecordNewMeal newMeal -> void $ unsafeNewMeal userId newMeal
               ChefRecordSetMeal setMeal -> void $ unsafeSetMeal userId setMeal
+            ProfileRecord profileRecord -> case profileRecord of
+              ProfileRecordChef setChef -> do
+                mChefValid <- validateChef setChef
+                case mChefValid of
+                  Nothing -> pure () -- FIXME error somehow?
+                  Just chefValid -> void $ unsafeSetChef userId chefValid
           flip runSqlPool systemEnvDatabase $ delete submissionId
           pure True
 

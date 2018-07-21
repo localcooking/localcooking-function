@@ -15,10 +15,10 @@ import LocalCooking.Function.System
   (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
 import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Chef
-  ( GetSetChef (..), MenuSettings (..), MealSettings (..)
+  ( SetChef (..), ChefValid (..), MenuSettings (..), MealSettings (..)
   )
 import LocalCooking.Semantics.ContentRecord
-  ( ContentRecord (ChefRecord), ChefRecord (..)
+  ( ContentRecord (ChefRecord, ProfileRecord), ChefRecord (..), ProfileRecord (ProfileRecordChef)
   , contentRecordVariant
   )
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -42,7 +42,7 @@ import LocalCooking.Database.Schema
     )
   , Unique
     ( UniqueChefOwner, UniqueMealPermalink, UniqueMenuDeadline
-    , UniqueStoredMealTag, UniqueStoredChefTag
+    , UniqueStoredMealTag, UniqueStoredChefTag, UniqueChefPermalink
     )
   , getStoredIngredientTagId
   )
@@ -62,7 +62,29 @@ import Database.Persist.Class (selectList, getBy, insert, insert_, update, get)
 
 
 
-getChef :: AuthToken -> SystemM (Maybe GetSetChef)
+validateChef :: SetChef -> SystemM (Maybe ChefValid)
+validateChef SetChef{..} =
+  case (,,) <$> setChefName
+            <*> setChefPermalink
+            <*> setChefAvatar of
+    Nothing -> pure Nothing
+    Just (name,permalink,avatar) -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mExisting <- getBy (UniqueChefPermalink permalink)
+        case mExisting of
+          Just _ -> pure Nothing
+          Nothing -> pure $ Just ChefValid
+            { chefValidName = name
+            , chefValidPermalink = permalink
+            , chefValidImages = setChefImages
+            , chefValidAvatar = avatar
+            , chefValidBio = setChefBio
+            , chefValidTags = setChefTags
+            }
+
+
+getChef :: AuthToken -> SystemM (Maybe ChefValid)
 getChef authToken = do
   mChef <- getChefFromAuthToken authToken
   case mChef of
@@ -74,31 +96,31 @@ getChef authToken = do
         case mTags of
           Nothing -> pure Nothing
           Just tags ->
-            pure $ Just GetSetChef
-              { getSetChefName = name
-              , getSetChefPermalink = permalink
-              , getSetChefImages = images
-              , getSetChefAvatar = avatar
-              , getSetChefBio = bio
-              , getSetChefTags = tags
+            pure $ Just ChefValid
+              { chefValidName = name
+              , chefValidPermalink = permalink
+              , chefValidImages = images
+              , chefValidAvatar = avatar
+              , chefValidBio = bio
+              , chefValidTags = tags
               }
 
 
 
-unsafeSetChef :: StoredUserId -> GetSetChef -> SystemM (Maybe StoredChefId)
-unsafeSetChef userId GetSetChef{..} = do
+unsafeSetChef :: StoredUserId -> ChefValid -> SystemM (Maybe StoredChefId)
+unsafeSetChef userId ChefValid{..} = do
   mChef <- getChefFromUserId userId
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO $ flip runSqlPool systemEnvDatabase $ case mChef of
     Nothing -> do
       chefId <- insert $ StoredChef
         userId
-        getSetChefName
-        getSetChefPermalink
-        getSetChefBio
-        getSetChefImages
-        getSetChefAvatar
-      forM_ getSetChefTags $ \t -> do
+        chefValidName
+        chefValidPermalink
+        chefValidBio
+        chefValidImages
+        chefValidAvatar
+      forM_ chefValidTags $ \t -> do
         mChefTagId <- getBy (UniqueStoredChefTag t)
         case mChefTagId of
           Nothing -> pure ()
@@ -106,25 +128,25 @@ unsafeSetChef userId GetSetChef{..} = do
       pure (Just chefId)
     Just (WithId chefId _) -> do
       update chefId
-        [ StoredChefName =. getSetChefName
-        , StoredChefPermalink =. getSetChefPermalink
-        , StoredChefBio =. getSetChefBio
-        , StoredChefImages =. getSetChefImages
-        , StoredChefAvatar =. getSetChefAvatar
+        [ StoredChefName =. chefValidName
+        , StoredChefPermalink =. chefValidPermalink
+        , StoredChefBio =. chefValidBio
+        , StoredChefImages =. chefValidImages
+        , StoredChefAvatar =. chefValidAvatar
         ]
-      assignChefTags chefId getSetChefTags
+      assignChefTags chefId chefValidTags
       pure (Just chefId)
 
 
-setChef :: AuthToken -> GetSetChef -> SystemM Bool
-setChef authToken getSetChef = do
+setChef :: AuthToken -> SetChef -> SystemM Bool
+setChef authToken setChef = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
     Just userId -> liftIO $ flip runSqlPool systemEnvDatabase $ do
       now <- liftIO getCurrentTime
-      let record = ChefRecord (ChefRecordChef getSetChef)
+      let record = ProfileRecord (ProfileRecordChef setChef)
       insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
       pure True
 
