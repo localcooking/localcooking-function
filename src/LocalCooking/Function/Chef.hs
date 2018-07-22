@@ -5,7 +5,12 @@
   , OverloadedStrings
   #-}
 
-module LocalCooking.Function.Chef where
+module LocalCooking.Function.Chef
+  ( ValidateChefError (..), validateChef
+  , getChef, setChef, unsafeStoreChef
+  , getMenus, newMenu, setMenu, unsafeStoreNewMenu, unsafeStoreSetMenu
+  , getMeals, newMeal, setMeal, unsafeStoreNewMeal, unsafeStoreSetMeal
+  ) where
 
 import LocalCooking.Function.Semantics
   ( getChefTags, getMealTags, getMenuTags, getMealIngredientsDiets
@@ -60,30 +65,42 @@ import Database.Persist.Class (selectList, getBy, insert, insert_, update, get)
 
 
 
+data ValidateChefError
+  = ChefInvalidNoName
+  | ChefInvalidNoPermalink
+  | ChefInvalidNoAvatar
+  | ChefInvalidNotUniquePermalink
 
 
-validateChef :: SetChef -> SystemM (Maybe ChefValid)
+-- | Turns user-supplied SetChef partial structure into a valid one, checking
+--   for uniqueness.
+validateChef :: SetChef -> SystemM (Either ValidateChefError ChefValid)
 validateChef SetChef{..} =
-  case (,,) <$> setChefName
-            <*> setChefPermalink
-            <*> setChefAvatar of
-    Nothing -> pure Nothing
-    Just (name,permalink,avatar) -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
-        mExisting <- getBy (UniqueChefPermalink permalink)
-        case mExisting of
-          Just _ -> pure Nothing
-          Nothing -> pure $ Just ChefValid
-            { chefValidName = name
-            , chefValidPermalink = permalink
-            , chefValidImages = setChefImages
-            , chefValidAvatar = avatar
-            , chefValidBio = setChefBio
-            , chefValidTags = setChefTags
-            }
+  case setChefName of
+    Nothing -> pure (Left ChefInvalidNoName)
+    Just name -> case setChefPermalink of
+      Nothing -> pure (Left ChefInvalidNoPermalink)
+      Just permalink -> case setChefAvatar of
+        Nothing -> pure (Left ChefInvalidNoAvatar)
+        Just avatar -> do
+          SystemEnv{systemEnvDatabase} <- getSystemEnv
+          liftIO $ flip runSqlPool systemEnvDatabase $ do
+            mExisting <- getBy (UniqueChefPermalink permalink)
+            case mExisting of
+              Just _ -> pure (Left ChefInvalidNotUniquePermalink)
+              Nothing -> pure $ Right ChefValid
+                { chefValidName = name
+                , chefValidPermalink = permalink
+                , chefValidImages = setChefImages
+                , chefValidAvatar = avatar
+                , chefValidBio = setChefBio
+                , chefValidTags = setChefTags
+                }
 
 
+-- | Witness the stored chef profile of a logged-in user - TODO what about
+--   universally? From a permalink?
+--   Context: chef.localcooking.com - a chef observing another chef's profile.
 getChef :: AuthToken -> SystemM (Maybe ChefValid)
 getChef authToken = do
   mChef <- getChefFromAuthToken authToken
@@ -106,9 +123,9 @@ getChef authToken = do
               }
 
 
-
-unsafeSetChef :: StoredUserId -> ChefValid -> SystemM (Maybe StoredChefId)
-unsafeSetChef userId ChefValid{..} = do
+-- | Pysically store the content of a 'ChefValid' data-view into the database
+unsafeStoreChef :: StoredUserId -> ChefValid -> SystemM (Maybe StoredChefId)
+unsafeStoreChef userId ChefValid{..} = do
   mChef <- getChefFromUserId userId
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO $ flip runSqlPool systemEnvDatabase $ case mChef of
@@ -138,6 +155,7 @@ unsafeSetChef userId ChefValid{..} = do
       pure (Just chefId)
 
 
+-- | Marshall a user-supplied chef profile into the content submission system
 setChef :: AuthToken -> SetChef -> SystemM Bool
 setChef authToken setChef = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
@@ -151,6 +169,7 @@ setChef authToken setChef = do
       pure True
 
 
+-- | Lookup all of a chef's own menus
 getMenus :: AuthToken -> SystemM (Maybe [WithId StoredMenuId MenuSettings])
 getMenus authToken = do
   mChef <- getChefFromAuthToken authToken
@@ -178,8 +197,10 @@ getMenus authToken = do
                     }
 
 
-unsafeNewMenu :: StoredUserId -> MenuSettings -> SystemM (Maybe StoredMenuId)
-unsafeNewMenu userId MenuSettings{..} = do
+-- | Physically store a chef's new menu. FIXME use AuthToken as identifier for
+--   authentic consistency?
+unsafeStoreNewMenu :: StoredUserId -> MenuSettings -> SystemM (Maybe StoredMenuId)
+unsafeStoreNewMenu userId MenuSettings{..} = do
   mChef <- getChefFromUserId userId
   case mChef of
     Nothing -> pure Nothing
@@ -205,6 +226,7 @@ unsafeNewMenu userId MenuSettings{..} = do
             pure (Just menuId)
 
 
+-- | Marhsall a new user-supplied chef menu into the content submission system
 newMenu :: AuthToken -> MenuSettings -> SystemM Bool
 newMenu authToken menu = do
   mChef <- getChefFromAuthToken authToken
@@ -223,8 +245,9 @@ newMenu authToken menu = do
             pure True
 
 
-unsafeSetMenu :: StoredUserId -> WithId StoredMenuId MenuSettings -> SystemM Bool
-unsafeSetMenu userId (WithId menuId MenuSettings{..}) = do
+-- | Physically store a chef's adjusted menu into the database.
+unsafeStoreSetMenu :: StoredUserId -> WithId StoredMenuId MenuSettings -> SystemM Bool
+unsafeStoreSetMenu userId (WithId menuId MenuSettings{..}) = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO $ flip runSqlPool systemEnvDatabase $ do
     isAuthorized <- hasRole userId Chef
@@ -246,6 +269,8 @@ unsafeSetMenu userId (WithId menuId MenuSettings{..}) = do
             pure True
 
 
+-- | Marhsall a user-supplied adjustment to a chef's menu into the content submission system
+--   FIXME differentiate a NewMenu from a SetMenu data-view?
 setMenu :: AuthToken -> WithId StoredMenuId MenuSettings -> SystemM Bool
 setMenu authToken menu = do
   isAuthorized <- verifyChefhood authToken
@@ -264,6 +289,7 @@ setMenu authToken menu = do
             pure True
 
 
+-- | Lookup all of the meals in a chef's own menu
 getMeals :: AuthToken -> StoredMenuId -> SystemM (Maybe [WithId StoredMealId MealSettings])
 getMeals authToken menuId = do
   isAuthorized <- verifyChefhood authToken
@@ -298,8 +324,9 @@ getMeals authToken menuId = do
                       }
 
 
-unsafeNewMeal :: StoredUserId -> WithId StoredMenuId MealSettings -> SystemM (Maybe StoredMealId)
-unsafeNewMeal userId (WithId menuId MealSettings{..}) = do
+-- | Physically store a chef's new meal into the database.
+unsafeStoreNewMeal :: StoredUserId -> WithId StoredMenuId MealSettings -> SystemM (Maybe StoredMealId)
+unsafeStoreNewMeal userId (WithId menuId MealSettings{..}) = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO $ flip runSqlPool systemEnvDatabase $ do
     isAuthorized <- hasRole userId Chef
@@ -332,6 +359,7 @@ unsafeNewMeal userId (WithId menuId MealSettings{..}) = do
             pure (Just mealId)
 
 
+-- | Marhsall a user-supplied chef's new meal into the content submission system
 newMeal :: AuthToken -> WithId StoredMenuId MealSettings -> SystemM Bool
 newMeal authToken meal = do
   isAuthorized <- verifyChefhood authToken
@@ -350,8 +378,9 @@ newMeal authToken meal = do
             pure True
 
 
-unsafeSetMeal :: StoredUserId -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
-unsafeSetMeal userId (WithId menuId (WithId mealId MealSettings{..})) = do
+-- | Physically store a chef's adjusted meal into the database.
+unsafeStoreSetMeal :: StoredUserId -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
+unsafeStoreSetMeal userId (WithId menuId (WithId mealId MealSettings{..})) = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO $ flip runSqlPool systemEnvDatabase $ do
     isAuthorized <- hasRole userId Chef
@@ -377,6 +406,7 @@ unsafeSetMeal userId (WithId menuId (WithId mealId MealSettings{..})) = do
             pure True
 
 
+-- | Marhsall a user-supplied chef's adjusted meal into the content submission system
 setMeal :: AuthToken -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
 setMeal authToken meal = do
   isAuthorized <- verifyChefhood authToken
@@ -395,6 +425,13 @@ setMeal authToken meal = do
             pure True
 
 
+
+
+
+-- * Utilities
+
+-- | Verify that a login session belongs to an authentic Chef according to
+--   the user's Role
 verifyChefhood :: AuthToken -> SystemM Bool
 verifyChefhood authToken = do
   mUserId <- getUserId authToken
@@ -404,6 +441,15 @@ verifyChefhood authToken = do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ hasRole userId Chef
 
+-- | Obtain a chef's profile identified by a login session
+getChefFromAuthToken :: AuthToken -> SystemM (Maybe (WithId StoredChefId StoredChef))
+getChefFromAuthToken authToken = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> getChefFromUserId userId
+
+-- | Obtain a chef's profile identified by a user id
 getChefFromUserId :: StoredUserId -> SystemM (Maybe (WithId StoredChefId StoredChef))
 getChefFromUserId userId = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
@@ -416,10 +462,3 @@ getChefFromUserId userId = do
         case mEnt of
           Nothing -> pure Nothing
           Just (Entity chefId chef) -> pure $ Just $ WithId chefId chef
-
-getChefFromAuthToken :: AuthToken -> SystemM (Maybe (WithId StoredChefId StoredChef))
-getChefFromAuthToken authToken = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure Nothing
-    Just userId -> getChefFromUserId userId

@@ -9,8 +9,8 @@ module LocalCooking.Function.Content where
 
 import LocalCooking.Function.Tag (unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag, unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag)
 import LocalCooking.Function.Chef
-  ( unsafeSetChef, unsafeNewMenu, unsafeSetMenu
-  , unsafeNewMeal, unsafeSetMeal, validateChef
+  ( unsafeStoreChef, unsafeStoreNewMenu, unsafeStoreSetMenu
+  , unsafeStoreNewMeal, unsafeStoreSetMeal, validateChef
   )
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
 import LocalCooking.Semantics.Common (WithId (..))
@@ -182,16 +182,16 @@ integrateRecord authToken submissionId = do
               TagRecordIngredient ingredientTag -> unsafeStoreIngredientTag ingredientTag
               TagRecordMeal mealTag             -> unsafeStoreMealTag mealTag
             ChefRecord chefRecord -> case chefRecord of
-              ChefRecordNewMenu newMenu -> void $ unsafeNewMenu userId newMenu
-              ChefRecordSetMenu setMenu -> void $ unsafeSetMenu userId setMenu
-              ChefRecordNewMeal newMeal -> void $ unsafeNewMeal userId newMeal
-              ChefRecordSetMeal setMeal -> void $ unsafeSetMeal userId setMeal
+              ChefRecordNewMenu newMenu -> void $ unsafeStoreNewMenu userId newMenu
+              ChefRecordSetMenu setMenu -> void $ unsafeStoreSetMenu userId setMenu
+              ChefRecordNewMeal newMeal -> void $ unsafeStoreNewMeal userId newMeal
+              ChefRecordSetMeal setMeal -> void $ unsafeStoreSetMeal userId setMeal
             ProfileRecord profileRecord -> case profileRecord of
               ProfileRecordChef setChef -> do
                 mChefValid <- validateChef setChef
                 case mChefValid of
-                  Nothing -> pure () -- FIXME error somehow?
-                  Just chefValid -> void $ unsafeSetChef userId chefValid
+                  Left _ -> pure () -- FIXME error somehow?
+                  Right chefValid -> void $ unsafeStoreChef userId chefValid
           flip runSqlPool systemEnvDatabase $ delete submissionId
           pure True
 
