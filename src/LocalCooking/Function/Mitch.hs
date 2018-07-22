@@ -59,9 +59,10 @@ import Data.Image.Source (ImageSource)
 import Data.Time (getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
 import Control.Monad (forM, forM_)
+import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
-import Database.Persist.Sql (runSqlPool)
+import Database.Persist.Sql (SqlBackend, runSqlPool)
 import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, count)
 
 
@@ -218,23 +219,20 @@ submitReview authToken orderId rating heading body images = do
 
 
 
-getReview :: StoredReviewId -> SystemM (Maybe Review)
+getReview :: StoredReviewId -> ReaderT SqlBackend IO (Maybe Review)
 getReview reviewId = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-  flip runSqlPool systemEnvDatabase $ do
-    mReview <- get reviewId
-    case mReview of
-      Nothing -> pure Nothing
-      Just (StoredReview _ _ _ _ rating submitted heading body images) ->
-        pure $ Just Review
-          { reviewRating = rating
-          , reviewSubmitted = submitted
-          , reviewHeading = heading
-          , reviewId = reviewId
-          , reviewBody = body
-          , reviewImages = images
-          }
+  mReview <- get reviewId
+  case mReview of
+    Nothing -> pure Nothing
+    Just (StoredReview _ _ _ _ rating submitted heading body images) ->
+      pure $ Just Review
+        { reviewRating = rating
+        , reviewSubmitted = submitted
+        , reviewHeading = heading
+        , reviewId = reviewId
+        , reviewBody = body
+        , reviewImages = images
+        }
 
 
 
@@ -312,31 +310,28 @@ getChefSynopsis chefId = do
             }
 
 
-getChefMenuSynopses :: StoredChefId -> SystemM (Maybe [MenuSynopsis])
+getChefMenuSynopses :: StoredChefId -> ReaderT SqlBackend IO (Maybe [MenuSynopsis])
 getChefMenuSynopses chefId = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
-    mChef <- get chefId
-    case mChef of
-      Nothing -> pure Nothing
-      Just _ -> do
-        xs <- selectList [StoredMenuAuthor ==. chefId] []
-        fmap (Just . catMaybes) $ forM xs $ \(Entity menuId (StoredMenu published deadline heading _ images _)) ->
-          case published of
-            Nothing -> pure Nothing
-            Just p -> do
-              mTags <- getMenuTags menuId
-              case mTags of
-                Nothing -> pure Nothing
-                Just tags ->
-                  pure $ Just MenuSynopsis
-                    { menuSynopsisPublished = p
-                    , menuSynopsisDeadline = deadline
-                    , menuSynopsisHeading = heading
-                    , menuSynopsisTags = tags
-                    , menuSynopsisImages = images
-                    }
+  mChef <- get chefId
+  case mChef of
+    Nothing -> pure Nothing
+    Just _ -> do
+      xs <- selectList [StoredMenuAuthor ==. chefId] []
+      fmap (Just . catMaybes) $ forM xs $ \(Entity menuId (StoredMenu published deadline heading _ images _)) ->
+        case published of
+          Nothing -> pure Nothing
+          Just p -> do
+            mTags <- getMenuTags menuId
+            case mTags of
+              Nothing -> pure Nothing
+              Just tags ->
+                pure $ Just MenuSynopsis
+                  { menuSynopsisPublished = p
+                  , menuSynopsisDeadline = deadline
+                  , menuSynopsisHeading = heading
+                  , menuSynopsisTags = tags
+                  , menuSynopsisImages = images
+                  }
 
 
 getMenuMealSynopses :: StoredMenuId -> SystemM (Maybe [MealSynopsis])
@@ -354,10 +349,12 @@ getMenuMealSynopses menuId = do
                   getMealSynopsis mealId
 
 
+-- FIXME
 browseChef :: Permalink -> SystemM (Maybe Chef)
 browseChef chefPermalink = do
   SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
-  mDeets <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
     mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
     case mChefEnt of
       Nothing -> pure Nothing
@@ -375,30 +372,26 @@ browseChef chefPermalink = do
                 n <- count [StoredOrderMenu ==. menuId]
                 liftIO (modifyIORef countRef (+ n))
               liftIO (readIORef countRef)
-            pure $ Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders)
-  case mDeets of
-    Nothing -> pure Nothing
-    Just (chefId,name,permalink,bio,images,tags,totalOrders,activeOrders) -> do
-      mMeals <- getChefMenuSynopses chefId
-      case mMeals of
-        Nothing -> pure Nothing
-        Just meals -> do
-          mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
-          case mReviews of
-            Nothing -> pure Nothing
-            Just (rating,reviews) ->
-              pure $ Just Chef
-                { chefName = name
-                , chefPermalink = permalink
-                , chefImages = images
-                , chefBio = bio
-                , chefRating = rating
-                , chefReviews = getReviewSynopsis <$> reviews
-                , chefActiveOrders = activeOrders
-                , chefTotalOrders = totalOrders
-                , chefTags = tags
-                , chefMenus = meals
-                }
+            mMeals <- getChefMenuSynopses chefId
+            case mMeals of
+              Nothing -> pure Nothing
+              Just meals -> do
+                mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
+                case mReviews of
+                  Nothing -> pure Nothing
+                  Just (rating,reviews) ->
+                    pure $ Just Chef
+                      { chefName = name
+                      , chefPermalink = permalink
+                      , chefImages = images
+                      , chefBio = bio
+                      , chefRating = rating
+                      , chefReviews = getReviewSynopsis <$> reviews
+                      , chefActiveOrders = activeOrders
+                      , chefTotalOrders = totalOrders
+                      , chefTags = tags
+                      , chefMenus = meals
+                      }
 
 
 browseMenu :: Permalink -> Day -> SystemM (Maybe Menu)
@@ -437,11 +430,12 @@ browseMenu chefPermalink deadline = do
                 , menuMeals = meals
                 }
 
+-- FIXME
 browseMeal :: Permalink -> Day -> Permalink -> SystemM (Maybe Meal)
 browseMeal chefPermalink deadline mealPermalink = do
   SystemEnv{systemEnvReviews,systemEnvDatabase} <- getSystemEnv
 
-  mStoredMeal <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
     mChef <- getBy (UniqueChefPermalink chefPermalink)
     case mChef of
       Nothing -> pure Nothing
@@ -473,27 +467,22 @@ browseMeal chefPermalink deadline mealPermalink = do
                         case mRating of
                           Nothing -> pure Nothing
                           Just rating -> do
-                            pure $ Just (title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets)
-  case mStoredMeal of
-    Nothing -> pure Nothing
-    Just (title,permalink,desc,inst,images,tags,orders,rating,reviewIds,price,ings,diets) -> do
-      reviews <- fmap catMaybes $ forM reviewIds getReview
-      ings' <- liftIO $ flip runSqlPool systemEnvDatabase $ fmap catMaybes $
-        forM ings getIngredientByName
-      pure $ Just Meal
-        { mealTitle = title
-        , mealPermalink = permalink
-        , mealDescription = desc
-        , mealInstructions = inst
-        , mealImages = images
-        , mealIngredients = ings'
-        , mealDiets = diets
-        , mealTags = tags
-        , mealOrders = orders
-        , mealRating = rating
-        , mealReviews = getReviewSynopsis <$> reviews
-        , mealPrice = price
-        }
+                            reviews <- fmap catMaybes $ forM reviewIds getReview
+                            ings' <- fmap catMaybes $ forM ings getIngredientByName
+                            pure $ Just Meal
+                              { mealTitle = title
+                              , mealPermalink = permalink
+                              , mealDescription = desc
+                              , mealInstructions = inst
+                              , mealImages = images
+                              , mealIngredients = ings'
+                              , mealDiets = diets
+                              , mealTags = tags
+                              , mealOrders = orders
+                              , mealRating = rating
+                              , mealReviews = getReviewSynopsis <$> reviews
+                              , mealPrice = price
+                              }
 
 
 getCart :: AuthToken -> SystemM (Maybe [CartEntry])
