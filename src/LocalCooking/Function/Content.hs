@@ -193,6 +193,7 @@ integrateRecord authToken submissionId = do
                 case mChefValid of
                   Left _ -> pure () -- FIXME error somehow?
                   Right chefValid -> void $ unsafeStoreChef userId chefValid
+            -- FIXME make total
           flip runSqlPool systemEnvDatabase $ delete submissionId
           pure True
 

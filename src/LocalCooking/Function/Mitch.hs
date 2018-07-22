@@ -5,10 +5,19 @@
   , OverloadedStrings
   #-}
 
-module LocalCooking.Function.Mitch where
+module LocalCooking.Function.Mitch
+  ( ValidateCustomerError (..), validateCustomer
+  , getCustomer, setCustomer, unsafeStoreCustomer
+  , getDiets, setDiets, getAllergies, setAllergies
+  , getReview, submitReview
+  , getChefSynopsis, getChefMenuSynopses, getMenuMealSynopses
+  , browseChef, browseMenu, browseMeal
+  , getCart, addToCart
+  , getOrders
+  ) where
 
 import LocalCooking.Semantics.Mitch
-  ( SetCustomer (..), CustomerValid (..), Diets (..), Allergies (..)
+  ( SetCustomer (..), CustomerValid (..), Diets (Diets), Allergies (Allergies)
   , Review (..)
   , Chef (..), ChefSynopsis (..)
   , MenuSynopsis (..), Menu (..)
@@ -149,6 +158,7 @@ setCustomer authToken setCustomer' = do
         pure True
 
 
+-- | Physically store the diets dictated by the Diets data-view
 setDiets :: AuthToken -> Diets -> SystemM Bool
 setDiets authToken (Diets ds) = do
   mUserId <- getUserId authToken
@@ -168,6 +178,7 @@ setDiets authToken (Diets ds) = do
             pure True
 
 
+-- | Witness the Diets data-view associated with a customer
 getDiets :: AuthToken -> SystemM (Maybe Diets)
 getDiets authToken = do
   mUserId <- getUserId authToken
@@ -186,6 +197,7 @@ getDiets authToken = do
               Just diets -> pure $ Just $ Diets diets
 
 
+-- | Physically store the allergies dictated by the Allergies data-view
 setAllergies :: AuthToken -> Allergies -> SystemM Bool
 setAllergies authToken (Allergies as) = do
   mUserId <- getUserId authToken
@@ -205,6 +217,7 @@ setAllergies authToken (Allergies as) = do
             pure True
 
 
+-- | Witness the Allergies data-view associated with a customer
 getAllergies :: AuthToken -> SystemM (Maybe Allergies)
 getAllergies authToken = do
   mUserId <- getUserId authToken
@@ -224,6 +237,8 @@ getAllergies authToken = do
 
 
 
+-- | Physically store a customer's review
+--   FIXME NewReview data-view?
 submitReview :: AuthToken -> StoredOrderId -> Rating -> Text
              -> MarkdownText -> [ImageSource] -> SystemM (Maybe StoredReviewId)
 submitReview authToken orderId rating heading body images = do
@@ -262,6 +277,8 @@ submitReview authToken orderId rating heading body images = do
 
 
 
+-- | Witness a customer's review
+--   FIXME GetReview data-view?
 getReview :: StoredReviewId -> ReaderT SqlBackend IO (Maybe Review)
 getReview reviewId = do
   mReview <- get reviewId
@@ -278,7 +295,7 @@ getReview reviewId = do
         }
 
 
-
+-- | Witness a MealSynopsis data-view
 getMealSynopsis :: StoredMealId -> SystemM (Maybe MealSynopsis)
 getMealSynopsis mealId = do
   SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
@@ -321,6 +338,7 @@ getMealSynopsis mealId = do
             }
 
 
+-- | Witness a ChefSynopsis data-view
 getChefSynopsis :: StoredChefId -> SystemM (Maybe ChefSynopsis)
 getChefSynopsis chefId = do
   SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
@@ -353,6 +371,7 @@ getChefSynopsis chefId = do
             }
 
 
+-- | Witness all MenuSynopsis data-views belonging to a chef
 getChefMenuSynopses :: StoredChefId -> ReaderT SqlBackend IO (Maybe [MenuSynopsis])
 getChefMenuSynopses chefId = do
   mChef <- get chefId
@@ -377,6 +396,7 @@ getChefMenuSynopses chefId = do
                   }
 
 
+-- | Witness all MealSynopsis data-views belonging to a Menu
 getMenuMealSynopses :: StoredMenuId -> SystemM (Maybe [MealSynopsis])
 getMenuMealSynopses menuId = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
@@ -392,7 +412,8 @@ getMenuMealSynopses menuId = do
                   getMealSynopsis mealId
 
 
--- FIXME
+-- | Witness a Chef data-view
+-- FIXME really dirty
 browseChef :: Permalink -> SystemM (Maybe Chef)
 browseChef chefPermalink = do
   SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
@@ -437,6 +458,8 @@ browseChef chefPermalink = do
                       }
 
 
+-- | Witness a Menu data-view
+-- FIXME really dirty
 browseMenu :: Permalink -> Day -> SystemM (Maybe Menu)
 browseMenu chefPermalink deadline = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
@@ -473,7 +496,9 @@ browseMenu chefPermalink deadline = do
                 , menuMeals = meals
                 }
 
--- FIXME
+
+-- | Witness a Meal data-view
+-- FIXME really dirty
 browseMeal :: Permalink -> Day -> Permalink -> SystemM (Maybe Meal)
 browseMeal chefPermalink deadline mealPermalink = do
   SystemEnv{systemEnvReviews,systemEnvDatabase} <- getSystemEnv
@@ -528,6 +553,7 @@ browseMeal chefPermalink deadline mealPermalink = do
                               }
 
 
+-- | Witness all CartEntry data-views belonging to a login session's customer
 getCart :: AuthToken -> SystemM (Maybe [CartEntry])
 getCart authToken = do
   mUserId <- getUserId authToken
@@ -540,7 +566,7 @@ getCart authToken = do
           $ selectList [CartRelationCustomer ==. userId] []
 
 
-
+-- | Add a meal to a customer's cart
 addToCart :: AuthToken -> Permalink -> Day -> Permalink -> Int -> SystemM Bool
 addToCart authToken chefPermalink deadline mealPermalink vol = do
   mUserId <- getUserId authToken
@@ -567,6 +593,7 @@ addToCart authToken chefPermalink deadline mealPermalink vol = do
 
 -- checkout :: ?
 
+-- | Witness all Order data-views belonging to a login-session's customer
 getOrders :: AuthToken -> SystemM (Maybe [Order])
 getOrders authToken = do
   mUserId <- getUserId authToken
