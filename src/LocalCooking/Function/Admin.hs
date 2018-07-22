@@ -32,7 +32,7 @@ import LocalCooking.Database.Schema.Content
   )
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Admin))
-import LocalCooking.Semantics.ContentRecord (ContentRecordVariant)
+import LocalCooking.Semantics.ContentRecord.Variant (ContentRecordVariant)
 
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import qualified Data.Set as Set
