@@ -52,7 +52,6 @@ import Network.HTTP.Client (httpLbs, method, responseBody, urlEncodedBody, parse
 newEmailToken :: StoredUserId -> SystemM EmailToken
 newEmailToken userId = do
   SystemEnv{systemEnvTokenContexts} <- getSystemEnv
-
   case systemEnvTokenContexts of
     TokenContexts{tokenContextEmail} -> do
       token <- liftIO (insertAccess tokenContextEmail userId)

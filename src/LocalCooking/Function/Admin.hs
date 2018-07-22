@@ -3,7 +3,10 @@
   , RecordWildCards
   #-}
 
-module LocalCooking.Function.Admin where
+module LocalCooking.Function.Admin
+  ( getUsers, setUser, addUser -- FIXME newUser?
+  , getSubmissionPolicy, setSubmissionPolicy, assignSubmissionPolicy
+  ) where
 
 import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..))
 import LocalCooking.Semantics.Admin (SetUser (..), NewUser (..), GetSetSubmissionPolicy (..))
@@ -45,6 +48,7 @@ import Database.Persist.Class (selectList, getBy, insert, insert_, delete, delet
 
 
 
+-- | Witness all User data-views, from an authenticated Admin
 getUsers :: AuthToken -> SystemM (Maybe [User])
 getUsers authToken = do
   isAuthorized <- verifyAdminhood authToken
@@ -73,7 +77,7 @@ getUsers authToken = do
             }
 
 
-
+-- | Assigned new user details with a SetUser data-view
 setUser :: AuthToken -> SetUser -> SystemM Bool
 setUser authToken x = do
   isAuthorized <- verifyAdminhood authToken
@@ -115,7 +119,7 @@ setUser authToken x = do
           pure True
 
 
-
+-- | Register a new user with the NewUser data-view
 addUser :: AuthToken -> NewUser -> SystemM Bool
 addUser authToken NewUser{..} = do
   isAuthorized <- verifyAdminhood authToken
@@ -134,18 +138,7 @@ addUser authToken NewUser{..} = do
             pure True
 
 
-
-verifyAdminhood :: AuthToken -> SystemM Bool
-verifyAdminhood authToken = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ hasRole userId Admin
-
-
-
+-- | Witness the GetSetSubmissionPolicy data-view for a specific ContentRecordVariant
 getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe GetSetSubmissionPolicy)
 getSubmissionPolicy authToken variant = do
   isAdmin <- verifyAdminhood authToken
@@ -164,7 +157,7 @@ getSubmissionPolicy authToken variant = do
             pure $ Just $ GetSetSubmissionPolicy variant additional assigned
 
 
-
+-- | Physically adjust the GetSetSubmissionPolicy data-view on the database
 setSubmissionPolicy :: AuthToken -> GetSetSubmissionPolicy -> SystemM Bool
 setSubmissionPolicy authToken (GetSetSubmissionPolicy variant additional assigned) = do
   isAdmin <- verifyAdminhood authToken
@@ -185,7 +178,7 @@ setSubmissionPolicy authToken (GetSetSubmissionPolicy variant additional assigne
       pure True
 
 
-
+-- | Assign an editor to be a manual content reviewer for a ContentRecordVariant
 assignSubmissionPolicy :: AuthToken -> StoredEditorId -> ContentRecordVariant -> SystemM Bool
 assignSubmissionPolicy authToken editorId variant = do
   isAdmin <- verifyAdminhood authToken
@@ -200,3 +193,19 @@ assignSubmissionPolicy authToken editorId variant = do
           Just (Entity policyId _) -> do
             insert_ (RecordAssignedSubmissionPolicy policyId editorId)
             pure True
+
+
+
+-- * Utilities
+
+
+-- | Verify that a login session belongs to an authentic Admin according to
+--   the user's Role
+verifyAdminhood :: AuthToken -> SystemM Bool
+verifyAdminhood authToken = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ hasRole userId Admin
