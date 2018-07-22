@@ -216,12 +216,12 @@ getSubmissions authToken variant = do
 
 approveSubmission :: AuthToken -> StoredRecordSubmissionId -> SystemM Bool
 approveSubmission authToken submissionId = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
   mEditor <- verifyEditorhood authToken
   case mEditor of
     Nothing -> pure False
     Just editorId -> do
-      mVariant <- flip runSqlPool systemEnvDatabase $ do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      mVariant <- liftIO $ flip runSqlPool systemEnvDatabase $ do
         mSubmission <- get submissionId
         case mSubmission of
           Nothing -> pure Nothing

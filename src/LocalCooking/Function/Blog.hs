@@ -56,35 +56,33 @@ import Database.Persist.Class
 -- * Category
 
 
-getBlogPostCategories :: SystemM [BlogPostCategorySynopsis]
+getBlogPostCategories :: ReaderT SqlBackend IO [BlogPostCategorySynopsis]
 getBlogPostCategories = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  flip runSqlPool systemEnvDatabase $ do
-    xs <- selectList [] [Asc StoredBlogPostCategoryPriority]
-    pure $ (\(Entity _ (StoredBlogPostCategory name priority permalink)) ->
-             BlogPostCategorySynopsis name permalink priority) <$> xs
+  xs <- selectList [] [Asc StoredBlogPostCategoryPriority]
+  pure $ (\(Entity _ (StoredBlogPostCategory name priority permalink)) ->
+            BlogPostCategorySynopsis name permalink priority) <$> xs
 
-getBlogPostCategory :: Permalink -> SystemM (Maybe GetBlogPostCategory)
+getBlogPostCategory :: Permalink -> ReaderT SqlBackend IO (Maybe GetBlogPostCategory)
 getBlogPostCategory permalink = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
-    mEnt <- getBy (UniqueBlogPostCategory permalink)
-    case mEnt of
-      Nothing -> pure Nothing
-      Just (Entity categoryId (StoredBlogPostCategory name _ permalink)) -> do
-        primary <- do
-          mPrimary <- selectFirst [StoredBlogPostPrimaryCategory ==. categoryId] []
-          case mPrimary of
-            Nothing -> pure Nothing
-            Just (Entity _ (StoredBlogPostPrimary primaryPost _)) -> getBlogPostSynopsisById primaryPost
-        posts <- do
-          xs <- selectList [StoredBlogPostCategory' ==. categoryId] [Asc StoredBlogPostPriority]
-          fmap catMaybes $ forM xs $ \(Entity postId _) -> getBlogPostSynopsisById postId
-        pure $ Just $ GetBlogPostCategory name permalink primary posts categoryId
+  mEnt <- getBy (UniqueBlogPostCategory permalink)
+  case mEnt of
+    Nothing -> pure Nothing
+    Just (Entity categoryId (StoredBlogPostCategory name _ permalink)) -> do
+      primary <- do
+        mPrimary <- selectFirst [StoredBlogPostPrimaryCategory ==. categoryId] []
+        case mPrimary of
+          Nothing -> pure Nothing
+          Just (Entity _ (StoredBlogPostPrimary primaryPost _)) -> getBlogPostSynopsisById primaryPost
+      posts <- do
+        xs <- selectList [StoredBlogPostCategory' ==. categoryId] [Asc StoredBlogPostPriority]
+        fmap catMaybes $ forM xs $ \(Entity postId _) -> getBlogPostSynopsisById postId
+      pure $ Just $ GetBlogPostCategory name permalink primary posts categoryId
 
+-- FIXME
 newBlogPostCategory :: NewBlogPostCategory -> SystemM (Maybe StoredBlogPostCategoryId)
 newBlogPostCategory = undefined
 
+-- FIXME
 setBlogPostCategory :: SetBlogPostCategory -> SystemM Bool
 setBlogPostCategory = undefined
 
