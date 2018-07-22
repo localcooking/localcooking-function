@@ -23,7 +23,6 @@ import Database.Persist.Class (getBy, get)
 uniqueEmail :: EmailAddress -> SystemM Bool
 uniqueEmail e = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
-
   liftIO $ flip runSqlPool systemEnvDatabase $ do
     mEnt <- getBy (UniqueEmail e)
     case mEnt of

@@ -7,7 +7,14 @@
   , FlexibleContexts
   #-}
 
-module LocalCooking.Function.Tag where
+module LocalCooking.Function.Tag
+  ( unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag
+  , unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag
+  , submitChefTag, submitCultureTag, submitDietTag
+  , submitFarmTag, submitIngredientTag, submitMealTag
+  , searchChefTags, searchCultureTags, searchDietTags
+  , searchFarmTags, searchIngredientTags, searchMealTags
+  ) where
 
 import LocalCooking.Function.System
   (SystemM, SystemEnv (..), getUserId, getSystemEnv)
