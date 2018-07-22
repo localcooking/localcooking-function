@@ -7,9 +7,9 @@ module LocalCooking.Function.Admin where
 
 import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..))
 import LocalCooking.Semantics.Admin (SetUser (..), NewUser (..), GetSetSubmissionPolicy (..))
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
 import LocalCooking.Database.Schema
-  ( FacebookUserDetails (..)
+  ( hasRole, FacebookUserDetails (..)
   , StoredUser (..)
   , UserRoleStored (..)
   , StoredEditorId
@@ -140,7 +140,9 @@ verifyAdminhood authToken = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
-    Just userId -> guardRole userId Admin
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ hasRole userId Admin
 
 
 

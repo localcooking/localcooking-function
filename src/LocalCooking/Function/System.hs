@@ -17,7 +17,6 @@ module LocalCooking.Function.System
   , TokenContexts (..)
   , Keys (..)
   , getUserId
-  , guardRole
   , getSystemEnv
   ) where
 
@@ -58,7 +57,7 @@ import Control.Exception (bracket)
 import Control.Concurrent.Async (async, cancel)
 import Control.Concurrent.STM (STM, atomically)
 import Control.Logging (withStderrLogging)
-import Database.Persist.Sql (ConnectionPool, runSqlPool)
+import Database.Persist.Sql (ConnectionPool, SqlBackend, runSqlPool)
 import Database.Persist.Postgresql (createPostgresqlPool)
 import Network.HTTP.Client (Manager)
 import Network.HTTP.Client.TLS (newTlsManager)
@@ -244,9 +243,3 @@ getUserId authToken = do
   case systemEnvTokenContexts of
     TokenContexts{tokenContextAuth} ->
       liftIO (lookupAccess tokenContextAuth authToken)
-
-
-guardRole :: StoredUserId -> UserRole -> SystemM Bool
-guardRole userId r = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO $ flip runSqlPool systemEnvDatabase $ hasRole userId r

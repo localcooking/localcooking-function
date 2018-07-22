@@ -17,7 +17,7 @@ module LocalCooking.Function.Blog
   ) where
 
 import LocalCooking.Function.System
-  (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+  (SystemM, SystemEnv (..), getUserId, getSystemEnv)
 import LocalCooking.Semantics.Blog
   ( GetBlogPost (GetBlogPost), NewBlogPost (NewBlogPost), SetBlogPost (SetBlogPost)
   , BlogPostSynopsis (..), BlogPostCategorySynopsis (..), GetBlogPostCategory (..)
@@ -27,7 +27,7 @@ import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema
-  ( StoredBlogPost (..), StoredBlogPostCategory (..), StoredBlogPostPrimary (..)
+  ( hasRole, StoredBlogPost (..), StoredBlogPostCategory (..), StoredBlogPostPrimary (..)
   , StoredBlogPostId, StoredEditor (..)
   , StoredBlogPostCategoryId
   , Unique

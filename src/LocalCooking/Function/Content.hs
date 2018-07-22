@@ -12,7 +12,7 @@ import LocalCooking.Function.Chef
   ( unsafeSetChef, unsafeNewMenu, unsafeSetMenu
   , unsafeNewMeal, unsafeSetMeal, validateChef
   )
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
 import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Content
   ( SetEditor (..), GetRecordSubmissionPolicy (..))
@@ -24,7 +24,7 @@ import LocalCooking.Semantics.ContentRecord.Variant (ContentRecordVariant)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema
-  ( StoredEditor (..), StoredEditorId
+  ( hasRole, StoredEditor (..), StoredEditorId
   , EntityField
     ( StoredEditorName
     )
@@ -247,12 +247,12 @@ verifyEditorhood authToken = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      isEditor <- guardRole userId Editor
-      if not isEditor
-        then pure Nothing
-        else do
-          SystemEnv{systemEnvDatabase} <- getSystemEnv
-          flip runSqlPool systemEnvDatabase $ do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        isEditor <- hasRole userId Editor
+        if not isEditor
+          then pure Nothing
+          else do
             mEnt <- getBy (UniqueEditor userId)
             case mEnt of
               Nothing -> pure Nothing

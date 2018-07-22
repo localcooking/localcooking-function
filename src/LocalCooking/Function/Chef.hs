@@ -12,7 +12,7 @@ import LocalCooking.Function.Semantics
   , assignChefTags, assignMealTags, assignMenuTags, assignMealIngredients
   )
 import LocalCooking.Function.System
-  (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+  (SystemM, SystemEnv (..), getUserId, getSystemEnv)
 import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Chef
   ( SetChef (..), ChefValid (..), MenuSettings (..), MealSettings (..)
@@ -24,7 +24,7 @@ import LocalCooking.Semantics.ContentRecord
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Chef))
 import LocalCooking.Database.Schema
-  ( StoredChef (..), StoredMenu (..), StoredMeal (..)
+  ( hasRole, StoredChef (..), StoredMenu (..), StoredMeal (..)
   , StoredChefId, StoredMenuId, StoredMealId, StoredUserId
   , MenuTagRelation (..), ChefTagRelation (..), MealTagRelation (..)
   , MealIngredient (..)
@@ -225,12 +225,12 @@ newMenu authToken menu = do
 
 unsafeSetMenu :: StoredUserId -> WithId StoredMenuId MenuSettings -> SystemM Bool
 unsafeSetMenu userId (WithId menuId MenuSettings{..}) = do
-  isAuthorized <- guardRole userId Chef
-  if not isAuthorized
-    then pure False
-    else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    isAuthorized <- hasRole userId Chef
+    if not isAuthorized
+      then pure False
+      else do
         mEnt <- get menuId
         case mEnt of
           Nothing -> pure False
@@ -300,12 +300,12 @@ getMeals authToken menuId = do
 
 unsafeNewMeal :: StoredUserId -> WithId StoredMenuId MealSettings -> SystemM (Maybe StoredMealId)
 unsafeNewMeal userId (WithId menuId MealSettings{..}) = do
-  isAuthorized <- guardRole userId Chef
-  if not isAuthorized
-    then pure Nothing
-    else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    isAuthorized <- hasRole userId Chef
+    if not isAuthorized
+      then pure Nothing
+      else do
         mEnt <- getBy (UniqueMealPermalink menuId mealSettingsPermalink)
         case mEnt of
           Just _ -> pure Nothing
@@ -352,12 +352,12 @@ newMeal authToken meal = do
 
 unsafeSetMeal :: StoredUserId -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
 unsafeSetMeal userId (WithId menuId (WithId mealId MealSettings{..})) = do
-  isAuthorized <- guardRole userId Chef
-  if not isAuthorized
-    then pure False
-    else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    isAuthorized <- hasRole userId Chef
+    if not isAuthorized
+      then pure False
+      else do
         mEnt <- get mealId
         case mEnt of
           Nothing -> pure False
@@ -400,16 +400,18 @@ verifyChefhood authToken = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
-    Just userId -> guardRole userId Chef
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ hasRole userId Chef
 
 getChefFromUserId :: StoredUserId -> SystemM (Maybe (WithId StoredChefId StoredChef))
 getChefFromUserId userId = do
-  isChef <- guardRole userId Chef
-  if not isChef
-    then pure Nothing
-    else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      flip runSqlPool systemEnvDatabase $ do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    isChef <- hasRole userId Chef
+    if not isChef
+      then pure Nothing
+      else do
         mEnt <- getBy (UniqueChefOwner userId)
         case mEnt of
           Nothing -> pure Nothing

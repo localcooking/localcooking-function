@@ -19,14 +19,14 @@ import LocalCooking.Semantics.Mitch
 import LocalCooking.Function.Semantics
   ( getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags
   , assignAllergies, assignDiets, getCustDiets, getCustAllergies)
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, guardRole, getSystemEnv)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
 import LocalCooking.Common.Rating (Rating)
 import qualified LocalCooking.Common.User.Role as UserRole
 import LocalCooking.Database.Schema
-  ( getIngredientByName, getMealId
+  ( getIngredientByName, getMealId, hasRole
   , StoredCustomer (..)
   , StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
   , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId, StoredOrderId
@@ -187,12 +187,12 @@ submitReview authToken orderId rating heading body images = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      ok <- guardRole userId UserRole.Customer
-      if not ok
-        then pure Nothing
-        else do
-          SystemEnv{systemEnvDatabase} <- getSystemEnv
-          liftIO $ flip runSqlPool systemEnvDatabase $ do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        ok <- hasRole userId UserRole.Customer
+        if not ok
+          then pure Nothing
+          else do
             mCust <- getBy (UniqueCustomer userId)
             case mCust of
               Nothing -> pure Nothing
