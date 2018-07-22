@@ -188,7 +188,8 @@ integrateRecord authToken submissionId = do
               ChefRecordSetMeal setMeal -> void $ unsafeStoreSetMeal userId setMeal
             ProfileRecord profileRecord -> case profileRecord of
               ProfileRecordChef setChef -> do
-                mChefValid <- validateChef setChef
+                mChefValid <- liftIO $ flip runSqlPool systemEnvDatabase $
+                  validateChef setChef
                 case mChefValid of
                   Left _ -> pure () -- FIXME error somehow?
                   Right chefValid -> void $ unsafeStoreChef userId chefValid

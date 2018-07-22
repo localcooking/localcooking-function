@@ -8,13 +8,17 @@
 module LocalCooking.Function.Mitch where
 
 import LocalCooking.Semantics.Mitch
-  ( GetSetCustomer (..), Diets (..), Allergies (..)
+  ( SetCustomer (..), CustomerValid (..), Diets (..), Allergies (..)
   , Review (..)
   , Chef (..), ChefSynopsis (..)
   , MenuSynopsis (..), Menu (..)
   , MealSynopsis (..), Meal (..)
   , Order (..), CartEntry (..)
   , getReviewSynopsis
+  )
+import LocalCooking.Semantics.ContentRecord
+  ( ContentRecord (ProfileRecord), ProfileRecord (ProfileRecordCustomer)
+  , contentRecordVariant
   )
 import LocalCooking.Function.Semantics
   ( getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags
@@ -49,6 +53,9 @@ import LocalCooking.Database.Schema
     , UniqueCustomer
     )
   )
+import LocalCooking.Database.Schema.Content
+  ( StoredRecordSubmission (..)
+  )
 
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
@@ -68,28 +75,27 @@ import Database.Persist.Class (selectList, get, getBy, insert, insert_, update, 
 
 
 
-setCustomer :: AuthToken -> GetSetCustomer -> SystemM Bool
-setCustomer authToken GetSetCustomer{..} = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
-        mCustEnt <- getBy (UniqueCustomer userId)
-        case mCustEnt of
-          Nothing -> do
-            insert_ (StoredCustomer userId getSetCustomerName getSetCustomerAddress)
-            pure True
-          Just (Entity custId _) -> do
-            update custId
-              [ StoredCustomerName =. getSetCustomerName
-              , StoredCustomerAddress =. getSetCustomerAddress
-              ]
-            pure True
+data ValidateCustomerError
+  = CustomerInvalidNoName
+  | CustomerInvalidNoAddress
 
 
-getCustomer :: AuthToken -> SystemM (Maybe GetSetCustomer)
+-- | Turns user-supplied SetCustomer partial structure into a valid one, checking
+--   for uniqueness.
+validateCustomer :: SetCustomer -> ReaderT SqlBackend IO (Either ValidateCustomerError CustomerValid)
+validateCustomer SetCustomer{..} =
+  case setCustomerName of
+    Nothing -> pure (Left CustomerInvalidNoName)
+    Just name -> case setCustomerAddress of
+      Nothing -> pure (Left CustomerInvalidNoAddress)
+      Just address -> pure $ Right CustomerValid
+        { customerValidName = name
+        , customerValidAddress = address
+        }
+
+
+-- | Witness the stored customer profile of a logged-in user
+getCustomer :: AuthToken -> SystemM (Maybe CustomerValid)
 getCustomer authToken = do
   mUserId <- getUserId authToken
   case mUserId of
@@ -101,9 +107,46 @@ getCustomer authToken = do
         case mCustEnt of
           Nothing -> pure Nothing
           Just (Entity _ (StoredCustomer _ name address)) ->
-            pure $ Just $ GetSetCustomer
+            pure $ Just $ CustomerValid
               name
               address
+
+
+-- | Physically store the content of a `CustomerValid` data-view into the database
+unsafeStoreCustomer :: AuthToken -> CustomerValid -> SystemM Bool
+unsafeStoreCustomer authToken CustomerValid{..} = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mCustEnt <- getBy (UniqueCustomer userId)
+        case mCustEnt of
+          Nothing -> do
+            insert_ (StoredCustomer userId customerValidName customerValidAddress)
+            pure True
+          Just (Entity custId _) -> do
+            update custId
+              [ StoredCustomerName =. customerValidName
+              , StoredCustomerAddress =. customerValidAddress
+              ]
+            pure True
+
+
+-- | Marshall a user-supplied customer profile into the content submission system
+setCustomer :: AuthToken -> SetCustomer -> SystemM Bool
+setCustomer authToken setCustomer' = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        now <- liftIO getCurrentTime
+        let record = ProfileRecord (ProfileRecordCustomer setCustomer')
+        insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
+        pure True
 
 
 setDiets :: AuthToken -> Diets -> SystemM Bool

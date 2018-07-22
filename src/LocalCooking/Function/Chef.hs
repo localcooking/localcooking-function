@@ -23,7 +23,8 @@ import LocalCooking.Semantics.Chef
   ( SetChef (..), ChefValid (..), MenuSettings (..), MealSettings (..)
   )
 import LocalCooking.Semantics.ContentRecord
-  ( ContentRecord (ChefRecord, ProfileRecord), ChefRecord (..), ProfileRecord (ProfileRecordChef)
+  ( ContentRecord (ChefRecord, ProfileRecord)
+  , ChefRecord (..), ProfileRecord (ProfileRecordChef)
   , contentRecordVariant
   )
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
@@ -58,9 +59,10 @@ import LocalCooking.Database.Schema.Content
 import Data.Maybe (catMaybes)
 import Data.Time (getCurrentTime)
 import Control.Monad (forM_, forM)
+import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.), (=.))
-import Database.Persist.Sql (runSqlPool)
+import Database.Persist.Sql (SqlBackend, runSqlPool)
 import Database.Persist.Class (selectList, getBy, insert, insert_, update, get)
 
 
@@ -74,7 +76,7 @@ data ValidateChefError
 
 -- | Turns user-supplied SetChef partial structure into a valid one, checking
 --   for uniqueness.
-validateChef :: SetChef -> SystemM (Either ValidateChefError ChefValid)
+validateChef :: SetChef -> ReaderT SqlBackend IO (Either ValidateChefError ChefValid)
 validateChef SetChef{..} =
   case setChefName of
     Nothing -> pure (Left ChefInvalidNoName)
@@ -83,19 +85,17 @@ validateChef SetChef{..} =
       Just permalink -> case setChefAvatar of
         Nothing -> pure (Left ChefInvalidNoAvatar)
         Just avatar -> do
-          SystemEnv{systemEnvDatabase} <- getSystemEnv
-          liftIO $ flip runSqlPool systemEnvDatabase $ do
-            mExisting <- getBy (UniqueChefPermalink permalink)
-            case mExisting of
-              Just _ -> pure (Left ChefInvalidNotUniquePermalink)
-              Nothing -> pure $ Right ChefValid
-                { chefValidName = name
-                , chefValidPermalink = permalink
-                , chefValidImages = setChefImages
-                , chefValidAvatar = avatar
-                , chefValidBio = setChefBio
-                , chefValidTags = setChefTags
-                }
+          mExisting <- getBy (UniqueChefPermalink permalink)
+          case mExisting of
+            Just _ -> pure (Left ChefInvalidNotUniquePermalink)
+            Nothing -> pure $ Right ChefValid
+              { chefValidName = name
+              , chefValidPermalink = permalink
+              , chefValidImages = setChefImages
+              , chefValidAvatar = avatar
+              , chefValidBio = setChefBio
+              , chefValidTags = setChefTags
+              }
 
 
 -- | Witness the stored chef profile of a logged-in user - TODO what about
@@ -124,6 +124,7 @@ getChef authToken = do
 
 
 -- | Pysically store the content of a 'ChefValid' data-view into the database
+--   FIXME should use AuthToken?
 unsafeStoreChef :: StoredUserId -> ChefValid -> SystemM (Maybe StoredChefId)
 unsafeStoreChef userId ChefValid{..} = do
   mChef <- getChefFromUserId userId
@@ -157,16 +158,17 @@ unsafeStoreChef userId ChefValid{..} = do
 
 -- | Marshall a user-supplied chef profile into the content submission system
 setChef :: AuthToken -> SetChef -> SystemM Bool
-setChef authToken setChef = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
+setChef authToken setChef' = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure False
-    Just userId -> liftIO $ flip runSqlPool systemEnvDatabase $ do
-      now <- liftIO getCurrentTime
-      let record = ProfileRecord (ProfileRecordChef setChef)
-      insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
-      pure True
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        now <- liftIO getCurrentTime
+        let record = ProfileRecord (ProfileRecordChef setChef')
+        insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
+        pure True
 
 
 -- | Lookup all of a chef's own menus
