@@ -18,6 +18,7 @@ module LocalCooking.Function.System
   , Keys (..)
   , getUserId
   , getSystemEnv
+  , liftDb -- FIXME use everywhere
   ) where
 
 import LocalCooking.Function.System.AccessToken (AccessTokenContext, newAccessTokenContext, expireThread, lookupAccess)
@@ -56,7 +57,7 @@ import Control.Exception (bracket)
 import Control.Concurrent.Async (async, cancel)
 import Control.Concurrent.STM (STM, atomically)
 import Control.Logging (withStderrLogging)
-import Database.Persist.Sql (ConnectionPool, runSqlPool)
+import Database.Persist.Sql (ConnectionPool, SqlBackend, runSqlPool)
 import Database.Persist.Postgresql (createPostgresqlPool)
 import Network.HTTP.Client (Manager)
 import Network.HTTP.Client.TLS (newTlsManager)
@@ -85,6 +86,14 @@ instance Aligned.MonadBaseControl IO SystemM (Compose Identity Identity) where
 
 getSystemEnv :: SystemM SystemEnv
 getSystemEnv = SystemM ask
+
+
+
+liftDb :: ReaderT SqlBackend IO a -> SystemM a
+liftDb x = do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  liftIO $ flip runSqlPool systemEnvDatabase x
+
 
 
 execSystemM :: NewSystemEnvArgs
