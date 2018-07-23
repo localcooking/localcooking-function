@@ -29,16 +29,18 @@ import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema
   ( hasRole, StoredBlogPost (..), StoredBlogPostCategory (..), StoredBlogPostPrimary (..)
-  , StoredBlogPostId, StoredEditor (..)
+  , StoredBlogPostId, StoredEditor (..), StoredEditorId
   , StoredBlogPostCategoryId
   , Unique
     ( UniqueBlogPost, UniqueBlogPostCategory, UniqueEditor
+    , UniquePrimaryBlogPost
     )
   , EntityField
     ( StoredBlogPostHeadline, StoredBlogPostPermalink, StoredBlogPostContent
     , StoredBlogPostCategory', StoredBlogPostPriority, StoredBlogPostCategoryPriority
     , StoredBlogPostCategoryPriority, StoredBlogPostPrimaryCategory
     , StoredBlogPostCategoryName, StoredBlogPostCategoryPermalink
+    , StoredBlogPostPrimaryPost, StoredBlogPostVariant, StoredBlogPostAuthor
     )
   )
 
@@ -51,7 +53,7 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.), (=.), SelectOpt (Asc))
 import Database.Persist.Sql (SqlBackend, runSqlPool)
 import Database.Persist.Class
-  (selectList, selectFirst, getBy, insert, insert_, update, get)
+  (selectList, selectFirst, getBy, insert, insert_, update, get, deleteWhere)
 
 
 
@@ -144,11 +146,81 @@ getBlogPost category permalink = do
               }
 
 newBlogPost :: AuthToken -> NewBlogPost -> SystemM (Maybe StoredBlogPostId)
-newBlogPost = undefined
+newBlogPost authToken NewBlogPost{..} = do
+  mAuthor <- verifyEditorhood authToken
+  case mAuthor of
+    Nothing -> pure Nothing
+    Just author -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mExisting <- getBy (UniqueBlogPost newBlogPostCategory newBlogPostPermalink)
+        case mExisting of
+          Just _ -> pure Nothing
+          Nothing -> do
+            now <- liftIO getCurrentTime
+            let insertBlogPost = insert $ StoredBlogPost
+                  author
+                  now
+                  newBlogPostHeadline
+                  newBlogPostPermalink
+                  newBlogPostContent
+                  newBlogPostVariant
+                  newBlogPostPriority
+                  newBlogPostCategory
+            if newBlogPostPrimary
+              then do
+                mPrimary <- getBy (UniquePrimaryBlogPost newBlogPostCategory)
+                case mPrimary of
+                  Just _ -> pure Nothing
+                  Nothing -> do
+                    postId <- insertBlogPost
+                    insert_ (StoredBlogPostPrimary postId newBlogPostCategory)
+                    pure (Just postId)
+              else Just <$> insertBlogPost
+
 
 setBlogPost :: AuthToken -> SetBlogPost -> SystemM Bool
-setBlogPost = undefined
-
+setBlogPost authToken SetBlogPost{..} = do
+  mAuthor <- verifyEditorhood authToken
+  case mAuthor of
+    Nothing -> pure False
+    Just author -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mPost <- get setBlogPostId
+        case mPost of
+          Nothing -> pure False
+          Just (StoredBlogPost _ _ _ _ _ _ _ category) -> do
+            let updatePost = do
+                  mPost <- getBy (UniqueBlogPost category setBlogPostPermalink)
+                  case mPost of
+                    Just _ -> pure False
+                    Nothing -> do
+                      update setBlogPostId
+                        [ StoredBlogPostAuthor =. author
+                        , StoredBlogPostHeadline =. setBlogPostHeadline
+                        , StoredBlogPostPermalink =. setBlogPostPermalink
+                        , StoredBlogPostContent =. setBlogPostContent
+                        , StoredBlogPostVariant =. setBlogPostVariant
+                        , StoredBlogPostPriority =. setBlogPostPriority
+                        ]
+                      pure True
+            if not setBlogPostPrimary
+              then do
+                deleteWhere
+                  [ StoredBlogPostPrimaryCategory ==. category
+                  , StoredBlogPostPrimaryPost ==. setBlogPostId
+                  ]
+                updatePost
+              else do
+                mPrimary <- getBy (UniquePrimaryBlogPost category)
+                case mPrimary of
+                  Just (Entity _ (StoredBlogPostPrimary primaryPost _))
+                    | primaryPost /= setBlogPostId -> pure False
+                    | otherwise -> updatePost
+                  Nothing -> do
+                    insert_ (StoredBlogPostPrimary setBlogPostId category)
+                    updatePost
 
 
 -- * Unexposed
@@ -165,3 +237,21 @@ getBlogPostSynopsisById k = do
         Just (StoredEditor _ name) ->
           pure $ Just $
             BlogPostSynopsis name timestamp headline permalink variant priority
+
+
+verifyEditorhood :: AuthToken -> SystemM (Maybe StoredEditorId)
+verifyEditorhood authToken = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure Nothing
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        isEditor <- hasRole userId Editor
+        if not isEditor
+          then pure Nothing
+          else do
+            mEnt <- getBy (UniqueEditor userId)
+            case mEnt of
+              Nothing -> pure Nothing
+              Just (Entity editorId _) -> pure (Just editorId)
