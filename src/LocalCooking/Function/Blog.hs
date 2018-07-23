@@ -23,6 +23,7 @@ import LocalCooking.Semantics.Blog
   , BlogPostSynopsis (..), BlogPostCategorySynopsis (..), GetBlogPostCategory (..)
   , SetBlogPostCategory (..), NewBlogPostCategory (..)
   )
+import qualified LocalCooking.Semantics.Blog as Blog
 import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
@@ -101,11 +102,46 @@ setBlogPostCategory SetBlogPostCategory{..} = do
 
 -- * Post
 
-getBlogPosts :: StoredBlogPostCategoryId -> SystemM [BlogPostSynopsis]
-getBlogPosts = undefined
+getBlogPosts :: StoredBlogPostCategoryId -> ReaderT SqlBackend IO [BlogPostSynopsis]
+getBlogPosts category = do
+  ents <- selectList [StoredBlogPostCategory' ==. category] []
+  fmap catMaybes $ forM ents $ \(Entity _ (StoredBlogPost author timestamp headline permalink _ variant priority _)) -> do
+    mAuthor <- get author
+    case mAuthor of
+      Nothing -> pure Nothing
+      Just (StoredEditor _ name) -> pure $ Just BlogPostSynopsis
+        { blogPostSynopsisAuthor = name
+        , blogPostSynopsisTimestamp = timestamp
+        , blogPostSynopsisHeadline = headline
+        , blogPostSynopsisPermalink = permalink
+        , blogPostSynopsisVariant = variant
+        , blogPostSynopsisPriority = priority
+        }
 
-getBlogPost :: StoredBlogPostCategoryId -> Permalink -> SystemM (Maybe GetBlogPost)
-getBlogPost = undefined
+getBlogPost :: StoredBlogPostCategoryId -> Permalink -> ReaderT SqlBackend IO (Maybe GetBlogPost)
+getBlogPost category permalink = do
+  mEnt <- getBy (UniqueBlogPost category permalink)
+  case mEnt of
+    Nothing -> pure Nothing
+    Just (Entity postId (StoredBlogPost author timestamp headline _ content variant priority _)) -> do
+      mAuthor <- get author
+      case mAuthor of
+        Nothing -> pure Nothing
+        Just (StoredEditor _ name) -> do
+          mCategory <- get category
+          case mCategory of
+            Nothing -> pure Nothing
+            Just (StoredBlogPostCategory categoryName _ _) -> pure $ Just GetBlogPost
+              { Blog.getBlogPostAuthor = name
+              , Blog.getBlogPostTimestamp = timestamp
+              , Blog.getBlogPostHeadline = headline
+              , Blog.getBlogPostPermalink = permalink
+              , Blog.getBlogPostContent = content
+              , Blog.getBlogPostVariant = variant
+              , Blog.getBlogPostPriority = priority
+              , Blog.getBlogPostCategory = categoryName
+              , Blog.getBlogPostId = postId
+              }
 
 newBlogPost :: AuthToken -> NewBlogPost -> SystemM (Maybe StoredBlogPostId)
 newBlogPost = undefined
