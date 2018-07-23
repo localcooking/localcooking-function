@@ -103,46 +103,54 @@ setBlogPostCategory SetBlogPostCategory{..} = do
 
 -- * Post
 
-getBlogPosts :: StoredBlogPostCategoryId -> ReaderT SqlBackend IO [BlogPostSynopsis]
+getBlogPosts :: Permalink -- ^ Category
+             -> ReaderT SqlBackend IO [BlogPostSynopsis]
 getBlogPosts category = do
-  ents <- selectList [StoredBlogPostCategory' ==. category] []
-  fmap catMaybes $ forM ents $ \(Entity _ (StoredBlogPost author timestamp headline permalink _ variant priority _)) -> do
-    mAuthor <- get author
-    case mAuthor of
-      Nothing -> pure Nothing
-      Just (StoredEditor _ name) -> pure $ Just BlogPostSynopsis
-        { blogPostSynopsisAuthor = name
-        , blogPostSynopsisTimestamp = timestamp
-        , blogPostSynopsisHeadline = headline
-        , blogPostSynopsisPermalink = permalink
-        , blogPostSynopsisVariant = variant
-        , blogPostSynopsisPriority = priority
-        }
+  mCat <- getBy (UniqueBlogPostCategory category)
+  case mCat of
+    Nothing -> pure []
+    Just (Entity categoryId _) -> do
+      ents <- selectList [StoredBlogPostCategory' ==. categoryId] []
+      fmap catMaybes $ forM ents $ \(Entity _ (StoredBlogPost author timestamp headline permalink _ variant priority _)) -> do
+        mAuthor <- get author
+        case mAuthor of
+          Nothing -> pure Nothing
+          Just (StoredEditor _ name) -> pure $ Just BlogPostSynopsis
+            { blogPostSynopsisAuthor = name
+            , blogPostSynopsisTimestamp = timestamp
+            , blogPostSynopsisHeadline = headline
+            , blogPostSynopsisPermalink = permalink
+            , blogPostSynopsisVariant = variant
+            , blogPostSynopsisPriority = priority
+            }
 
-getBlogPost :: StoredBlogPostCategoryId -> Permalink -> ReaderT SqlBackend IO (Maybe GetBlogPost)
+getBlogPost :: Permalink -- ^ Category
+            -> Permalink -- ^ Post
+            -> ReaderT SqlBackend IO (Maybe GetBlogPost)
 getBlogPost category permalink = do
-  mEnt <- getBy (UniqueBlogPost category permalink)
-  case mEnt of
+  mCat <- getBy (UniqueBlogPostCategory category)
+  case mCat of
     Nothing -> pure Nothing
-    Just (Entity postId (StoredBlogPost author timestamp headline _ content variant priority _)) -> do
-      mAuthor <- get author
-      case mAuthor of
+    Just (Entity categoryId (StoredBlogPostCategory categoryName _ _)) -> do
+      mEnt <- getBy (UniqueBlogPost categoryId permalink)
+      case mEnt of
         Nothing -> pure Nothing
-        Just (StoredEditor _ name) -> do
-          mCategory <- get category
-          case mCategory of
+        Just (Entity postId (StoredBlogPost author timestamp headline _ content variant priority _)) -> do
+          mAuthor <- get author
+          case mAuthor of
             Nothing -> pure Nothing
-            Just (StoredBlogPostCategory categoryName _ _) -> pure $ Just GetBlogPost
-              { Blog.getBlogPostAuthor = name
-              , Blog.getBlogPostTimestamp = timestamp
-              , Blog.getBlogPostHeadline = headline
-              , Blog.getBlogPostPermalink = permalink
-              , Blog.getBlogPostContent = content
-              , Blog.getBlogPostVariant = variant
-              , Blog.getBlogPostPriority = priority
-              , Blog.getBlogPostCategory = categoryName
-              , Blog.getBlogPostId = postId
-              }
+            Just (StoredEditor _ name) ->
+              pure $ Just GetBlogPost
+                { Blog.getBlogPostAuthor = name
+                , Blog.getBlogPostTimestamp = timestamp
+                , Blog.getBlogPostHeadline = headline
+                , Blog.getBlogPostPermalink = permalink
+                , Blog.getBlogPostContent = content
+                , Blog.getBlogPostVariant = variant
+                , Blog.getBlogPostPriority = priority
+                , Blog.getBlogPostCategory = categoryName
+                , Blog.getBlogPostId = postId
+                }
 
 newBlogPost :: AuthToken -> NewBlogPost -> SystemM (Maybe StoredBlogPostId)
 newBlogPost authToken NewBlogPost{..} = do
