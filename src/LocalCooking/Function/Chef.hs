@@ -198,8 +198,7 @@ getMenus authToken = do
                     }
 
 
--- | Physically store a chef's new menu. FIXME use AuthToken as identifier for
---   authentic consistency?
+-- | Physically store a chef's new menu.
 unsafeStoreNewMenu :: StoredUserId -> MenuSettings -> SystemM (Maybe StoredMenuId)
 unsafeStoreNewMenu userId MenuSettings{..} = do
   mChef <- getChefFromUserId userId
@@ -271,7 +270,6 @@ unsafeStoreSetMenu userId (WithId menuId MenuSettings{..}) = do
 
 
 -- | Marhsall a user-supplied adjustment to a chef's menu into the content submission system
---   FIXME differentiate a NewMenu from a SetMenu data-view?
 setMenu :: AuthToken -> WithId StoredMenuId MenuSettings -> SystemM Bool
 setMenu authToken menu = do
   isAuthorized <- verifyChefhood authToken
