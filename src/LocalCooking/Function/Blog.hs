@@ -81,24 +81,34 @@ getBlogPostCategory permalink = do
         fmap catMaybes $ forM xs $ \(Entity postId _) -> getBlogPostSynopsisById postId
       pure $ Just $ GetBlogPostCategory name permalink primary posts categoryId
 
-newBlogPostCategory :: NewBlogPostCategory -> ReaderT SqlBackend IO (Maybe StoredBlogPostCategoryId)
-newBlogPostCategory NewBlogPostCategory{..} = do
-  mEnt <- getBy (UniqueBlogPostCategory newBlogPostCategoryPermalink)
-  case mEnt of
-    Just _ -> pure Nothing
-    Nothing -> do
-      Just <$> insert (StoredBlogPostCategory newBlogPostCategoryName newBlogPostCategoryPriority newBlogPostCategoryPermalink)
+newBlogPostCategory :: AuthToken -> NewBlogPostCategory -> SystemM (Maybe StoredBlogPostCategoryId)
+newBlogPostCategory authToken NewBlogPostCategory{..} = do
+  mAuthor <- verifyEditorhood authToken
+  case mAuthor of
+    Nothing -> pure Nothing
+    Just _ -> do
+      liftDb $ do
+        mEnt <- getBy (UniqueBlogPostCategory newBlogPostCategoryPermalink)
+        case mEnt of
+          Just _ -> pure Nothing
+          Nothing -> do
+            Just <$> insert (StoredBlogPostCategory newBlogPostCategoryName newBlogPostCategoryPriority newBlogPostCategoryPermalink)
 
-setBlogPostCategory :: SetBlogPostCategory -> ReaderT SqlBackend IO Bool
-setBlogPostCategory SetBlogPostCategory{..} = do
-  mEnt <- get setBlogPostCategoryId
-  case mEnt of
+setBlogPostCategory :: AuthToken -> SetBlogPostCategory -> SystemM Bool
+setBlogPostCategory authToken SetBlogPostCategory{..} = do
+  mAuthor <- verifyEditorhood authToken
+  case mAuthor of
     Nothing -> pure False
-    Just _ -> True <$ update setBlogPostCategoryId
-      [ StoredBlogPostCategoryName =. setBlogPostCategoryName
-      , StoredBlogPostCategoryPriority =. setBlogPostCategoryPriority
-      , StoredBlogPostCategoryPermalink =. setBlogPostCategoryPermalink
-      ]
+    Just _ -> do
+      liftDb $ do
+        mEnt <- get setBlogPostCategoryId
+        case mEnt of
+          Nothing -> pure False
+          Just _ -> True <$ update setBlogPostCategoryId
+            [ StoredBlogPostCategoryName =. setBlogPostCategoryName
+            , StoredBlogPostCategoryPriority =. setBlogPostCategoryPriority
+            , StoredBlogPostCategoryPermalink =. setBlogPostCategoryPermalink
+            ]
 
 
 -- * Post
