@@ -37,6 +37,7 @@ import LocalCooking.Database.Schema
     ( StoredBlogPostHeadline, StoredBlogPostPermalink, StoredBlogPostContent
     , StoredBlogPostCategory', StoredBlogPostPriority, StoredBlogPostCategoryPriority
     , StoredBlogPostCategoryPriority, StoredBlogPostPrimaryCategory
+    , StoredBlogPostCategoryName, StoredBlogPostCategoryPermalink
     )
   )
 
@@ -78,13 +79,24 @@ getBlogPostCategory permalink = do
         fmap catMaybes $ forM xs $ \(Entity postId _) -> getBlogPostSynopsisById postId
       pure $ Just $ GetBlogPostCategory name permalink primary posts categoryId
 
--- FIXME
-newBlogPostCategory :: NewBlogPostCategory -> SystemM (Maybe StoredBlogPostCategoryId)
-newBlogPostCategory = undefined
+newBlogPostCategory :: NewBlogPostCategory -> ReaderT SqlBackend IO (Maybe StoredBlogPostCategoryId)
+newBlogPostCategory NewBlogPostCategory{..} = do
+  mEnt <- getBy (UniqueBlogPostCategory newBlogPostCategoryPermalink)
+  case mEnt of
+    Just _ -> pure Nothing
+    Nothing -> do
+      Just <$> insert (StoredBlogPostCategory newBlogPostCategoryName newBlogPostCategoryPriority newBlogPostCategoryPermalink)
 
--- FIXME
-setBlogPostCategory :: SetBlogPostCategory -> SystemM Bool
-setBlogPostCategory = undefined
+setBlogPostCategory :: SetBlogPostCategory -> ReaderT SqlBackend IO Bool
+setBlogPostCategory SetBlogPostCategory{..} = do
+  mEnt <- get setBlogPostCategoryId
+  case mEnt of
+    Nothing -> pure False
+    Just _ -> True <$ update setBlogPostCategoryId
+      [ StoredBlogPostCategoryName =. setBlogPostCategoryName
+      , StoredBlogPostCategoryPriority =. setBlogPostCategoryPriority
+      , StoredBlogPostCategoryPermalink =. setBlogPostCategoryPermalink
+      ]
 
 
 -- * Post
