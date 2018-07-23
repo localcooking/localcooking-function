@@ -18,7 +18,7 @@ module LocalCooking.Function.Mitch
 
 import LocalCooking.Semantics.Mitch
   ( SetCustomer (..), CustomerValid (..), Diets (Diets), Allergies (Allergies)
-  , Review (..)
+  , Review (..), SubmitReview (..)
   , Chef (..), ChefSynopsis (..)
   , MenuSynopsis (..), Menu (..)
   , MealSynopsis (..), Meal (..)
@@ -239,9 +239,8 @@ getAllergies authToken = do
 
 -- | Physically store a customer's review
 --   FIXME NewReview data-view?
-submitReview :: AuthToken -> StoredOrderId -> Rating -> Text
-             -> MarkdownText -> [ImageSource] -> SystemM (Maybe StoredReviewId)
-submitReview authToken orderId rating heading body images = do
+submitReview :: AuthToken -> SubmitReview -> SystemM (Maybe StoredReviewId)
+submitReview authToken (SubmitReview orderId rating heading body images) = do
   mUserId <- getUserId authToken
   case mUserId of
     Nothing -> pure Nothing

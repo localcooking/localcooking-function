@@ -7,7 +7,8 @@
 module LocalCooking.Function.Common where
 
 import LocalCooking.Semantics.Common
-  (User (..), SetUser (..), Login (..), SocialLoginForm (..), Register (..), RegisterError (..), ConfirmEmailError (..), SocialLogin (..))
+  ( User (..), SetUser (..), Login (..), SocialLoginForm (..), Register (..)
+  , RegisterError (..), ConfirmEmailError (..), SocialLogin (..), ChangePassword (..))
 import LocalCooking.Function.System
   (SystemM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..), getSystemEnv)
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
@@ -253,19 +254,24 @@ setUser authToken SetUser{..} = do
                 mUser <- get setUserId
                 case mUser of
                   Nothing -> pure False
-                  Just (StoredUser _ _ pw _)
-                    | pw /= setUserOldPassword -> pure False
-                    | otherwise -> do
-                      update setUserId
-                        [ StoredUserEmail =. setUserEmail
-                        , StoredUserPassword =. setUserNewPassword
-                        ]
-                      case setUserSocialLogin of
-                        SocialLoginForm mFb -> do
-                          case mFb of
-                            Nothing -> deleteBy (UniqueFacebookUserDetailsOwner setUserId)
-                            Just userFb -> insert_ (FacebookUserDetails userFb setUserId)
-                      pure True
+                  Just (StoredUser _ _ pw _) -> do
+                    let continue = do
+                          case setUserEmail of
+                            Nothing -> pure ()
+                            Just newEmail -> update setUserId [StoredUserEmail =. newEmail]
+                          case setUserSocialLogin of
+                            Nothing -> pure ()
+                            Just (SocialLoginForm mFb) -> case mFb of
+                              Nothing -> deleteBy (UniqueFacebookUserDetailsOwner setUserId)
+                              Just userFb -> insert_ (FacebookUserDetails userFb setUserId)
+                          pure True
+                    case setUserChangePassword of
+                      Nothing -> continue
+                      Just (ChangePassword{..})
+                        | not (pw == oldPassword) -> pure False
+                        | otherwise -> do
+                            update setUserId [StoredUserPassword =. newPassword]
+                            continue
 
 
 -- TODO FIXME individual field validation

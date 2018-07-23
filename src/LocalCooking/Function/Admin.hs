@@ -4,7 +4,7 @@
   #-}
 
 module LocalCooking.Function.Admin
-  ( getUsers, setUser, addUser -- FIXME newUser?
+  ( getUsers, setUser, addUser
   , getSubmissionPolicy, setSubmissionPolicy, assignSubmissionPolicy
   ) where
 
@@ -167,12 +167,11 @@ setSubmissionPolicy authToken (GetSetSubmissionPolicy variant additional assigne
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- getBy (UniqueSubmissionPolicyVariant variant)
-        void $ case mEnt of -- FIXME retain policyId?
+        case mEnt of
           Just (Entity p _) -> do
             update p [RecordSubmissionPolicyAdditional =. additional]
-            pure p
           Nothing -> do
-            insert (RecordSubmissionPolicy variant additional)
+            insert_ (RecordSubmissionPolicy variant additional)
       forM_ assigned $ \editorId ->
         void $ assignSubmissionPolicy authToken editorId variant
       pure True
