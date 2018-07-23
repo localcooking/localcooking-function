@@ -12,19 +12,24 @@ import LocalCooking.Function.Chef
   ( unsafeStoreChef, unsafeStoreNewMenu, unsafeStoreSetMenu
   , unsafeStoreNewMeal, unsafeStoreSetMeal, validateChef
   )
+import LocalCooking.Function.Mitch
+  ( unsafeStoreCustomer, validateCustomer
+  )
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
 import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Content
-  ( SetEditor (..), GetRecordSubmissionPolicy (..))
+  ( SetEditor (..), EditorValid (..), GetRecordSubmissionPolicy (..))
 import LocalCooking.Semantics.Content.Approval
   ( GetEditor (..), GetRecordSubmission (..))
 import LocalCooking.Semantics.ContentRecord
-  ( ContentRecord (..), TagRecord (..), ChefRecord (..), ProfileRecord (..))
-import LocalCooking.Semantics.ContentRecord.Variant (ContentRecordVariant)
+  ( ContentRecord (..), TagRecord (..), ChefRecord (..), ProfileRecord (..)
+  , contentRecordVariant)
+import LocalCooking.Semantics.ContentRecord.Variant
+  (ContentRecordVariant)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema
-  ( hasRole, StoredEditor (..), StoredEditorId
+  ( hasRole, StoredEditor (..), StoredEditorId, StoredUserId
   , EntityField
     ( StoredEditorName
     )
@@ -53,31 +58,28 @@ import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Monoid ((<>))
+import Data.Time (getCurrentTime)
 import Control.Monad (forM, void)
+import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Logging (warn')
 import Database.Persist (Entity (..), (==.), (=.))
-import Database.Persist.Sql (runSqlPool)
+import Database.Persist.Sql (SqlBackend, runSqlPool)
 import Database.Persist.Class (selectList, getBy, insert_, update, get, delete)
 
 
 
+data ValidateEditorError
+  = EditorInvalidNoName
 
-setEditor :: AuthToken -> SetEditor -> SystemM Bool
-setEditor authToken SetEditor{..} = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
-        mCustEnt <- getBy (UniqueEditor userId)
-        case mCustEnt of
-          Nothing -> do
-            insert_ (StoredEditor userId setEditorName)
-          Just (Entity editorId _) ->
-            update editorId [StoredEditorName =. setEditorName]
-        pure True
+
+validateEditor :: SetEditor -> ReaderT SqlBackend IO (Either ValidateEditorError EditorValid)
+validateEditor SetEditor{..} = do
+  case setEditorName of
+    Nothing -> pure (Left EditorInvalidNoName)
+    Just name -> pure $ Right EditorValid
+      { editorValidName = name
+      }
 
 
 getEditor :: AuthToken -> SystemM (Maybe GetEditor)
@@ -104,6 +106,32 @@ getEditor authToken = do
               forM xs $ \(Entity approvalId _) -> pure approvalId
             pure $ Just $ GetEditor name variants approved
 
+
+unsafeStoreEditor :: StoredUserId -> EditorValid -> SystemM Bool
+unsafeStoreEditor userId EditorValid{..} = do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    mCustEnt <- getBy (UniqueEditor userId)
+    case mCustEnt of
+      Nothing -> do
+        insert_ (StoredEditor userId editorValidName)
+      Just (Entity editorId _) ->
+        update editorId [StoredEditorName =. editorValidName]
+    pure True
+
+
+setEditor :: AuthToken -> SetEditor -> SystemM Bool
+setEditor authToken setEditor' = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    Nothing -> pure False
+    Just userId -> do
+      SystemEnv{systemEnvDatabase} <- getSystemEnv
+      liftIO $ flip runSqlPool systemEnvDatabase $ do
+        now <- liftIO getCurrentTime
+        let record = ProfileRecord (ProfileRecordEditor setEditor')
+        insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
+        pure True
 
 
 getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe GetRecordSubmissionPolicy)
@@ -193,7 +221,18 @@ integrateRecord authToken submissionId = do
                 case mChefValid of
                   Left _ -> pure () -- FIXME error somehow?
                   Right chefValid -> void $ unsafeStoreChef userId chefValid
-            -- FIXME make total
+              ProfileRecordCustomer setCustomer -> do
+                mCustomerValid <- liftIO $ flip runSqlPool systemEnvDatabase $
+                  validateCustomer setCustomer
+                case mCustomerValid of
+                  Left _ -> pure () -- FIXME error somehow?
+                  Right customerValid -> void $ unsafeStoreCustomer userId customerValid
+              ProfileRecordEditor setEditor -> do
+                mEditorValid <- liftIO $ flip runSqlPool systemEnvDatabase $
+                  validateEditor setEditor
+                case mEditorValid of
+                  Left _ -> pure () -- FIXME error somehow?
+                  Right editorValid -> void $ unsafeStoreEditor userId editorValid
           flip runSqlPool systemEnvDatabase $ delete submissionId
           pure True
 

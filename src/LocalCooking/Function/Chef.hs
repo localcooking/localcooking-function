@@ -124,7 +124,6 @@ getChef authToken = do
 
 
 -- | Pysically store the content of a 'ChefValid' data-view into the database
---   FIXME should use AuthToken?
 unsafeStoreChef :: StoredUserId -> ChefValid -> SystemM (Maybe StoredChefId)
 unsafeStoreChef userId ChefValid{..} = do
   mChef <- getChefFromUserId userId

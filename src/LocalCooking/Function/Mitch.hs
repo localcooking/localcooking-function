@@ -42,7 +42,7 @@ import LocalCooking.Database.Schema
   ( getIngredientByName, getMealId, hasRole
   , StoredCustomer (..)
   , StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
-  , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId, StoredOrderId
+  , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId, StoredOrderId, StoredUserId
   , CartRelation (..)
   , EntityField
     ( StoredMenuAuthor
@@ -122,25 +122,21 @@ getCustomer authToken = do
 
 
 -- | Physically store the content of a `CustomerValid` data-view into the database
-unsafeStoreCustomer :: AuthToken -> CustomerValid -> SystemM Bool
-unsafeStoreCustomer authToken CustomerValid{..} = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
-        mCustEnt <- getBy (UniqueCustomer userId)
-        case mCustEnt of
-          Nothing -> do
-            insert_ (StoredCustomer userId customerValidName customerValidAddress)
-            pure True
-          Just (Entity custId _) -> do
-            update custId
-              [ StoredCustomerName =. customerValidName
-              , StoredCustomerAddress =. customerValidAddress
-              ]
-            pure True
+unsafeStoreCustomer :: StoredUserId -> CustomerValid -> SystemM Bool
+unsafeStoreCustomer userId CustomerValid{..} = do
+  SystemEnv{systemEnvDatabase} <- getSystemEnv
+  liftIO $ flip runSqlPool systemEnvDatabase $ do
+    mCustEnt <- getBy (UniqueCustomer userId)
+    case mCustEnt of
+      Nothing -> do
+        insert_ (StoredCustomer userId customerValidName customerValidAddress)
+        pure True
+      Just (Entity custId _) -> do
+        update custId
+          [ StoredCustomerName =. customerValidName
+          , StoredCustomerAddress =. customerValidAddress
+          ]
+        pure True
 
 
 -- | Marshall a user-supplied customer profile into the content submission system
@@ -238,7 +234,6 @@ getAllergies authToken = do
 
 
 -- | Physically store a customer's review
---   FIXME NewReview data-view?
 submitReview :: AuthToken -> SubmitReview -> SystemM (Maybe StoredReviewId)
 submitReview authToken (SubmitReview orderId rating heading body images) = do
   mUserId <- getUserId authToken
@@ -277,7 +272,6 @@ submitReview authToken (SubmitReview orderId rating heading body images) = do
 
 
 -- | Witness a customer's review
---   FIXME GetReview data-view?
 getReview :: StoredReviewId -> ReaderT SqlBackend IO (Maybe Review)
 getReview reviewId = do
   mReview <- get reviewId
@@ -412,7 +406,6 @@ getMenuMealSynopses menuId = do
 
 
 -- | Witness a Chef data-view
--- FIXME really dirty
 browseChef :: Permalink -> SystemM (Maybe Chef)
 browseChef chefPermalink = do
   SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
@@ -458,7 +451,6 @@ browseChef chefPermalink = do
 
 
 -- | Witness a Menu data-view
--- FIXME really dirty
 browseMenu :: Permalink -> Day -> SystemM (Maybe Menu)
 browseMenu chefPermalink deadline = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
@@ -497,7 +489,6 @@ browseMenu chefPermalink deadline = do
 
 
 -- | Witness a Meal data-view
--- FIXME really dirty
 browseMeal :: Permalink -> Day -> Permalink -> SystemM (Maybe Meal)
 browseMeal chefPermalink deadline mealPermalink = do
   SystemEnv{systemEnvReviews,systemEnvDatabase} <- getSystemEnv
