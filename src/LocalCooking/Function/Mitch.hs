@@ -36,13 +36,12 @@ import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSyst
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
-import LocalCooking.Common.Rating (Rating)
 import qualified LocalCooking.Common.User.Role as UserRole
 import LocalCooking.Database.Schema
   ( getIngredientByName, getMealId, hasRole
   , StoredCustomer (..)
   , StoredMenu (..), StoredChef (..), StoredOrder (..), StoredMeal (..), StoredReview (..)
-  , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId, StoredOrderId, StoredUserId
+  , StoredChefId, StoredMealId, StoredMenuId, StoredReviewId, StoredUserId
   , CartRelation (..)
   , EntityField
     ( StoredMenuAuthor
@@ -67,11 +66,8 @@ import LocalCooking.Database.Schema.Content
   )
 
 import Data.Maybe (catMaybes)
-import Data.Text (Text)
 import Data.Text.Permalink (Permalink)
-import Data.Text.Markdown (MarkdownText)
 import Data.IORef (newIORef, readIORef, modifyIORef)
-import Data.Image.Source (ImageSource)
 import Data.Time (getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
 import Control.Monad (forM, forM_)

@@ -24,7 +24,6 @@ import LocalCooking.Semantics.Blog
   , SetBlogPostCategory (..), NewBlogPostCategory (..)
   )
 import qualified LocalCooking.Semantics.Blog as Blog
-import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
 import LocalCooking.Database.Schema
@@ -47,7 +46,7 @@ import LocalCooking.Database.Schema
 import Data.Maybe (catMaybes)
 import Data.Time (getCurrentTime)
 import Data.Text.Permalink (Permalink)
-import Control.Monad (forM_, forM)
+import Control.Monad (forM)
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.), (=.), SelectOpt (Asc))
@@ -71,7 +70,7 @@ getBlogPostCategory permalink = do
   mEnt <- getBy (UniqueBlogPostCategory permalink)
   case mEnt of
     Nothing -> pure Nothing
-    Just (Entity categoryId (StoredBlogPostCategory name _ permalink)) -> do
+    Just (Entity categoryId (StoredBlogPostCategory name _ _)) -> do
       primary <- do
         mPrimary <- selectFirst [StoredBlogPostPrimaryCategory ==. categoryId] []
         case mPrimary of
@@ -192,8 +191,8 @@ setBlogPost authToken SetBlogPost{..} = do
           Nothing -> pure False
           Just (StoredBlogPost _ _ _ _ _ _ _ category) -> do
             let updatePost = do
-                  mPost <- getBy (UniqueBlogPost category setBlogPostPermalink)
-                  case mPost of
+                  mPrimary <- getBy (UniqueBlogPost category setBlogPostPermalink)
+                  case mPrimary of
                     Just _ -> pure False
                     Nothing -> do
                       update setBlogPostId

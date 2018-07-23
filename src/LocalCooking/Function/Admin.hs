@@ -44,7 +44,7 @@ import Control.Monad (forM, forM_, void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.), (=.))
 import Database.Persist.Sql (runSqlPool)
-import Database.Persist.Class (selectList, getBy, insert, insert_, delete, deleteBy, update)
+import Database.Persist.Class (selectList, getBy, insert_, delete, deleteBy, update)
 
 
 
