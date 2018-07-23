@@ -10,7 +10,7 @@ import LocalCooking.Semantics.Common
   ( User (..), SetUser (..), Login (..), SocialLoginForm (..), Register (..)
   , RegisterError (..), ConfirmEmailError (..), SocialLogin (..), ChangePassword (..))
 import LocalCooking.Function.System
-  (SystemM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..), getSystemEnv)
+  (SystemM, SystemEnv (..), TokenContexts (..), Managers (..), Keys (..), getSystemEnv, liftDb)
 import LocalCooking.Function.System.AccessToken (insertAccess, lookupAccess, revokeAccess)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.AccessToken.Email (EmailToken)
@@ -61,7 +61,7 @@ newEmailToken userId = do
 
 confirmEmail :: EmailToken -> SystemM ConfirmEmailError
 confirmEmail token = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- getSystemEnv
+  SystemEnv{systemEnvTokenContexts} <- getSystemEnv
 
   case systemEnvTokenContexts of
     TokenContexts{tokenContextEmail} -> do
@@ -69,7 +69,7 @@ confirmEmail token = do
       case mUserId of
         Nothing -> pure ConfirmEmailTokenNonexistent
         Just userId -> do
-          liftIO $ flip runSqlPool systemEnvDatabase $ do
+          liftDb $ do
             -- FIXME lightweight existence checker?
             mUser <- get userId
             case mUser of
@@ -82,9 +82,9 @@ confirmEmail token = do
 
 login :: Login -> SystemM (Maybe AuthToken)
 login Login{..} = do
-  SystemEnv{systemEnvDatabase,systemEnvTokenContexts} <- getSystemEnv
+  SystemEnv{systemEnvTokenContexts} <- getSystemEnv
 
-  mUserId <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+  mUserId <- liftDb $ do
     mEnt <- getBy (UniqueEmail loginEmail)
     case mEnt of
       Nothing -> pure Nothing
@@ -113,7 +113,6 @@ socialLogin x = case x of
         { keysFacebook
         }
       , systemEnvFBRedirect
-      , systemEnvDatabase
       , systemEnvTokenContexts = TokenContexts
         { tokenContextAuth
         }
@@ -127,7 +126,7 @@ socialLogin x = case x of
     case eLoginErr of
       Left e -> pure $ Left $ Just e
       Right (fbToken,fbUserId) -> do
-        mUserId <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mUserId <- liftDb $ do
           mFbUser <- getBy (UniqueFacebookUserId fbUserId)
           case mFbUser of
             Nothing -> pure Nothing
@@ -145,8 +144,7 @@ socialLogin x = case x of
 register :: Register -> SystemM (Maybe RegisterError)
 register Register{..} = do
   SystemEnv
-    { systemEnvDatabase
-    , systemEnvKeys = Keys
+    { systemEnvKeys = Keys
       { keysSparkPost = SparkPostCredentials{sparkPostKey}
       , keysGoogle = GoogleCredentials
         { googleReCaptchaSecret
@@ -178,7 +176,7 @@ register Register{..} = do
         liftIO $ putStrLn $ "recaptcha failure: " ++ show (responseBody resp)
         pure $ Just $ RegisterReCaptchaFailure (responseBody resp)
       | otherwise -> do
-        mUserId <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+        mUserId <- liftDb $ do
           mEnt <- getBy (UniqueEmail registerEmail)
           case mEnt of
             Just _ -> pure Nothing
@@ -206,7 +204,7 @@ register Register{..} = do
 -- | Something like "get user details"
 getUser :: AuthToken -> SystemM (Maybe User)
 getUser authToken = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- getSystemEnv
+  SystemEnv{systemEnvTokenContexts} <- getSystemEnv
 
   case systemEnvTokenContexts of
     TokenContexts{tokenContextAuth} -> do
@@ -214,7 +212,7 @@ getUser authToken = do
       case mUserId of
         Nothing -> pure Nothing
         Just k -> do
-          liftIO $ flip runSqlPool systemEnvDatabase $ do
+          liftDb $ do
             mStoredUser <- get k
             case mStoredUser of
               Nothing -> pure Nothing
@@ -240,7 +238,7 @@ getUser authToken = do
 -- | "set user details"
 setUser :: AuthToken -> SetUser -> SystemM Bool
 setUser authToken SetUser{..} = do
-  SystemEnv{systemEnvTokenContexts,systemEnvDatabase} <- getSystemEnv
+  SystemEnv{systemEnvTokenContexts} <- getSystemEnv
 
   case systemEnvTokenContexts of
     TokenContexts{tokenContextAuth} -> do
@@ -250,7 +248,7 @@ setUser authToken SetUser{..} = do
         Just k
           | k /= setUserId -> pure False
           | otherwise ->
-              liftIO $ flip runSqlPool systemEnvDatabase $ do
+              liftDb $ do
                 mUser <- get setUserId
                 case mUser of
                   Nothing -> pure False

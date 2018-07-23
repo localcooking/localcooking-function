@@ -32,7 +32,7 @@ import LocalCooking.Semantics.ContentRecord
 import LocalCooking.Function.Semantics
   ( getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags
   , assignAllergies, assignDiets, getCustDiets, getCustAllergies)
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
@@ -106,8 +106,7 @@ getCustomer authToken = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mCustEnt <- getBy (UniqueCustomer userId)
         case mCustEnt of
           Nothing -> pure Nothing
@@ -120,8 +119,7 @@ getCustomer authToken = do
 -- | Physically store the content of a `CustomerValid` data-view into the database
 unsafeStoreCustomer :: StoredUserId -> CustomerValid -> SystemM Bool
 unsafeStoreCustomer userId CustomerValid{..} = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftDb $ do
     mCustEnt <- getBy (UniqueCustomer userId)
     case mCustEnt of
       Nothing -> do
@@ -142,8 +140,7 @@ setCustomer authToken setCustomer' = do
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         now <- liftIO getCurrentTime
         let record = ProfileRecord (ProfileRecordCustomer setCustomer')
         insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
@@ -157,8 +154,7 @@ setDiets authToken (Diets ds) = do
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mCustEnt <- getBy (UniqueCustomer userId)
         mCust <- case mCustEnt of
           Nothing -> pure Nothing
@@ -177,8 +173,7 @@ getDiets authToken = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mCustEnt <- getBy (UniqueCustomer userId)
         case mCustEnt of
           Nothing -> pure Nothing
@@ -196,8 +191,7 @@ setAllergies authToken (Allergies as) = do
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mCustEnt <- getBy (UniqueCustomer userId)
         mCust <- case mCustEnt of
           Nothing -> pure Nothing
@@ -216,8 +210,7 @@ getAllergies authToken = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mCustEnt <- getBy (UniqueCustomer userId)
         case mCustEnt of
           Nothing -> pure Nothing
@@ -236,8 +229,7 @@ submitReview authToken (SubmitReview orderId rating heading body images) = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         ok <- hasRole userId UserRole.Customer
         if not ok
           then pure Nothing
@@ -287,9 +279,9 @@ getReview reviewId = do
 -- | Witness a MealSynopsis data-view
 getMealSynopsis :: StoredMealId -> SystemM (Maybe MealSynopsis)
 getMealSynopsis mealId = do
-  SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
+  SystemEnv{systemEnvReviews} <- getSystemEnv
 
-  mCont <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+  mCont <- liftDb $ do
     mMeal <- get mealId
     case mMeal of
       Nothing -> pure Nothing
@@ -330,9 +322,9 @@ getMealSynopsis mealId = do
 -- | Witness a ChefSynopsis data-view
 getChefSynopsis :: StoredChefId -> SystemM (Maybe ChefSynopsis)
 getChefSynopsis chefId = do
-  SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
+  SystemEnv{systemEnvReviews} <- getSystemEnv
 
-  mStoredChef <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+  mStoredChef <- liftDb $ do
     mChef <- get chefId
     case mChef of
       Nothing -> pure Nothing
@@ -388,9 +380,7 @@ getChefMenuSynopses chefId = do
 -- | Witness all MealSynopsis data-views belonging to a Menu
 getMenuMealSynopses :: StoredMenuId -> SystemM (Maybe [MealSynopsis])
 getMenuMealSynopses menuId = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-  mXs <- flip runSqlPool systemEnvDatabase $ do
+  mXs <- liftDb $ do
     mMenu <- get menuId
     case mMenu of
       Nothing -> pure Nothing
@@ -404,9 +394,9 @@ getMenuMealSynopses menuId = do
 -- | Witness a Chef data-view
 browseChef :: Permalink -> SystemM (Maybe Chef)
 browseChef chefPermalink = do
-  SystemEnv{systemEnvDatabase,systemEnvReviews} <- getSystemEnv
+  SystemEnv{systemEnvReviews} <- getSystemEnv
 
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftDb $ do
     mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
     case mChefEnt of
       Nothing -> pure Nothing
@@ -449,9 +439,7 @@ browseChef chefPermalink = do
 -- | Witness a Menu data-view
 browseMenu :: Permalink -> Day -> SystemM (Maybe Menu)
 browseMenu chefPermalink deadline = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-  mMenuDeets <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+  mMenuDeets <- liftDb $ do
     mChef <- getBy (UniqueChefPermalink chefPermalink)
     case mChef of
       Nothing -> pure Nothing
@@ -487,9 +475,9 @@ browseMenu chefPermalink deadline = do
 -- | Witness a Meal data-view
 browseMeal :: Permalink -> Day -> Permalink -> SystemM (Maybe Meal)
 browseMeal chefPermalink deadline mealPermalink = do
-  SystemEnv{systemEnvReviews,systemEnvDatabase} <- getSystemEnv
+  SystemEnv{systemEnvReviews} <- getSystemEnv
 
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftDb $ do
     mChef <- getBy (UniqueChefPermalink chefPermalink)
     case mChef of
       Nothing -> pure Nothing
@@ -546,8 +534,7 @@ getCart authToken = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $
+      liftDb $
         fmap (Just . fmap (\(Entity _ (CartRelation _ mealId vol time)) -> CartEntry mealId vol time))
           $ selectList [CartRelationCustomer ==. userId] []
 
@@ -559,8 +546,7 @@ addToCart authToken chefPermalink deadline mealPermalink vol = do
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mMealId <- getMealId chefPermalink deadline mealPermalink
         case mMealId of
           Nothing -> pure False
@@ -586,8 +572,7 @@ getOrders authToken = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      mXs <- flip runSqlPool systemEnvDatabase $ do
+      mXs <- liftDb $ do
         mCust <- getBy (UniqueCustomer userId)
         case mCust of
           Nothing -> pure Nothing

@@ -15,7 +15,7 @@ import LocalCooking.Function.Chef
 import LocalCooking.Function.Mitch
   ( unsafeStoreCustomer, validateCustomer
   )
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
 import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Content
   ( SetEditor (..), EditorValid (..), GetRecordSubmissionPolicy (..))
@@ -88,8 +88,7 @@ getEditor authToken = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mCustEnt <- getBy (UniqueEditor userId)
         case mCustEnt of
           Nothing -> pure Nothing
@@ -109,8 +108,7 @@ getEditor authToken = do
 
 unsafeStoreEditor :: StoredUserId -> EditorValid -> SystemM Bool
 unsafeStoreEditor userId EditorValid{..} = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftDb $ do
     mCustEnt <- getBy (UniqueEditor userId)
     case mCustEnt of
       Nothing -> do
@@ -126,8 +124,7 @@ setEditor authToken setEditor' = do
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         now <- liftIO getCurrentTime
         let record = ProfileRecord (ProfileRecordEditor setEditor')
         insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
@@ -140,8 +137,7 @@ getSubmissionPolicy authToken variant = do
   case mEditor of
     Nothing -> pure Nothing
     Just _ -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
         case mPolicy of
           Nothing -> do
@@ -160,8 +156,7 @@ isApprovedSubmission authToken submissionId = do
   case mEditor of
     Nothing -> pure Nothing
     Just _ -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mSubmission <- get submissionId
         case mSubmission of
           Nothing -> pure Nothing
@@ -192,8 +187,7 @@ integrateRecord authToken submissionId = do
     Just isVerified
       | not isVerified -> pure False
       | otherwise -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      mUserRec <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+      mUserRec <- liftDb $ do
         mSub <- get submissionId
         case mSub of
           Nothing -> pure Nothing
@@ -216,24 +210,21 @@ integrateRecord authToken submissionId = do
               ChefRecordSetMeal setMeal -> void $ unsafeStoreSetMeal userId setMeal
             ProfileRecord profileRecord -> case profileRecord of
               ProfileRecordChef setChef -> do
-                mChefValid <- liftIO $ flip runSqlPool systemEnvDatabase $
-                  validateChef setChef
+                mChefValid <- liftDb $ validateChef setChef
                 case mChefValid of
                   Left _ -> pure () -- FIXME error somehow?
                   Right chefValid -> void $ unsafeStoreChef userId chefValid
               ProfileRecordCustomer setCustomer -> do
-                mCustomerValid <- liftIO $ flip runSqlPool systemEnvDatabase $
-                  validateCustomer setCustomer
+                mCustomerValid <- liftDb $ validateCustomer setCustomer
                 case mCustomerValid of
                   Left _ -> pure () -- FIXME error somehow?
                   Right customerValid -> void $ unsafeStoreCustomer userId customerValid
               ProfileRecordEditor setEditor -> do
-                mEditorValid <- liftIO $ flip runSqlPool systemEnvDatabase $
-                  validateEditor setEditor
+                mEditorValid <- liftDb $ validateEditor setEditor
                 case mEditorValid of
                   Left _ -> pure () -- FIXME error somehow?
                   Right editorValid -> void $ unsafeStoreEditor userId editorValid
-          flip runSqlPool systemEnvDatabase $ delete submissionId
+          liftDb $ delete submissionId
           pure True
 
 
@@ -244,8 +235,7 @@ getSubmissions authToken variant = do
   case mEditor of
     Nothing -> pure Nothing
     Just _ -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         xs <- selectList [StoredRecordSubmissionVariant ==. variant] []
         fmap Just $ forM xs $ \(Entity submissionId (StoredRecordSubmission author timestamp content _)) -> do
           approvals <- do
@@ -261,8 +251,7 @@ approveSubmission authToken submissionId = do
   case mEditor of
     Nothing -> pure False
     Just editorId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      mVariant <- liftIO $ flip runSqlPool systemEnvDatabase $ do
+      mVariant <- liftDb $ do
         mSubmission <- get submissionId
         case mSubmission of
           Nothing -> pure Nothing
@@ -275,8 +264,7 @@ approveSubmission authToken submissionId = do
           case mPolicy of
             Nothing -> pure False
             Just _ -> do
-              flip runSqlPool systemEnvDatabase $
-                insert_ $ RecordSubmissionApproval submissionId editorId
+              liftDb $ insert_ $ RecordSubmissionApproval submissionId editorId
               void (integrateRecord authToken submissionId)
               pure True
 
@@ -288,8 +276,7 @@ verifyEditorhood authToken = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         isEditor <- hasRole userId Editor
         if not isEditor
           then pure Nothing

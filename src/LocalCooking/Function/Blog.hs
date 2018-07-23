@@ -17,7 +17,7 @@ module LocalCooking.Function.Blog
   ) where
 
 import LocalCooking.Function.System
-  (SystemM, SystemEnv (..), getUserId, getSystemEnv)
+  (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
 import LocalCooking.Semantics.Blog
   ( GetBlogPost (GetBlogPost), NewBlogPost (NewBlogPost), SetBlogPost (SetBlogPost)
   , BlogPostSynopsis (..), BlogPostCategorySynopsis (..), GetBlogPostCategory (..)
@@ -150,8 +150,7 @@ newBlogPost authToken NewBlogPost{..} = do
   case mAuthor of
     Nothing -> pure Nothing
     Just author -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mExisting <- getBy (UniqueBlogPost newBlogPostCategory newBlogPostPermalink)
         case mExisting of
           Just _ -> pure Nothing
@@ -184,8 +183,7 @@ setBlogPost authToken SetBlogPost{..} = do
   case mAuthor of
     Nothing -> pure False
     Just author -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mPost <- get setBlogPostId
         case mPost of
           Nothing -> pure False
@@ -244,8 +242,7 @@ verifyEditorhood authToken = do
   case mUserId of
     Nothing -> pure Nothing
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         isEditor <- hasRole userId Editor
         if not isEditor
           then pure Nothing

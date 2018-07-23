@@ -10,7 +10,7 @@ module LocalCooking.Function.Admin
 
 import LocalCooking.Semantics.Common (User (..), SocialLoginForm (..))
 import LocalCooking.Semantics.Admin (SetUser (..), NewUser (..), GetSetSubmissionPolicy (..))
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
 import LocalCooking.Database.Schema
   ( hasRole, FacebookUserDetails (..)
   , StoredUser (..)
@@ -55,9 +55,7 @@ getUsers authToken = do
   if not isAuthorized
     then pure Nothing
     else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         xs <- selectList [] []
         fmap Just $ forM xs $ \(Entity k (StoredUser created email _ conf)) -> do
           roles <- fmap (fmap (\(Entity _ (UserRoleStored r _)) -> r))
@@ -85,14 +83,11 @@ setUser authToken x = do
     then pure False
     else case x of
       SetUserDelete User{userId} -> do
-        SystemEnv{systemEnvDatabase} <- getSystemEnv
-        liftIO $ flip runSqlPool systemEnvDatabase $ do
+        liftDb $ do
           delete userId
           pure True
       SetUserUpdate{setUserUpdateUser = User{..}, setUserUpdateNewPassword} -> do
-        SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-        liftIO $ flip runSqlPool systemEnvDatabase $ do
+        liftDb $ do
           update userId $
             [ StoredUserCreated =. userCreated
             , StoredUserEmail =. userEmail
@@ -126,9 +121,7 @@ addUser authToken NewUser{..} = do
   if not isAuthorized
     then pure False
     else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mEnt <- getBy (UniqueEmail newUserEmail)
         case mEnt of
           Just _ -> pure False
@@ -145,8 +138,7 @@ getSubmissionPolicy authToken variant = do
   if not isAdmin
     then pure Nothing
     else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mEnt <- getBy (UniqueSubmissionPolicyVariant variant)
         case mEnt of
           Nothing -> pure Nothing
@@ -164,8 +156,7 @@ setSubmissionPolicy authToken (GetSetSubmissionPolicy variant additional assigne
   if not isAdmin
     then pure False
     else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mEnt <- getBy (UniqueSubmissionPolicyVariant variant)
         case mEnt of
           Just (Entity p _) -> do
@@ -184,8 +175,7 @@ assignSubmissionPolicy authToken editorId variant = do
   if not isAdmin
     then pure False
     else do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mEnt <- getBy (UniqueSubmissionPolicyVariant variant)
         case mEnt of
           Nothing -> pure False
@@ -206,5 +196,4 @@ verifyAdminhood authToken = do
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ hasRole userId Admin
+      liftDb $ hasRole userId Admin

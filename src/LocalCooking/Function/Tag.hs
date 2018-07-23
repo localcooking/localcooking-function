@@ -17,7 +17,7 @@ module LocalCooking.Function.Tag
   ) where
 
 import LocalCooking.Function.System
-  (SystemM, SystemEnv (..), getUserId, getSystemEnv)
+  (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (TagRecord), contentRecordVariant
   , TagRecord (..)
@@ -60,39 +60,27 @@ import Database.Persist.Class (get, insert_, get)
 
 unsafeStoreChefTag :: ChefTag -> SystemM ()
 unsafeStoreChefTag tag = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  flip runSqlPool systemEnvDatabase $ do
-    insert_ (StoredChefTag tag)
+  liftDb $ insert_ (StoredChefTag tag)
 
 unsafeStoreCultureTag :: CultureTag -> SystemM ()
 unsafeStoreCultureTag tag = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  flip runSqlPool systemEnvDatabase $ do
-    insert_ (StoredCultureTag tag)
+  liftDb $ insert_ (StoredCultureTag tag)
 
 unsafeStoreDietTag :: DietTag -> SystemM ()
 unsafeStoreDietTag tag = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  flip runSqlPool systemEnvDatabase $ do
-    insert_ (StoredDietTag tag)
+  liftDb $ insert_ (StoredDietTag tag)
 
 unsafeStoreFarmTag :: FarmTag -> SystemM ()
 unsafeStoreFarmTag tag = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  flip runSqlPool systemEnvDatabase $ do
-    insert_ (StoredFarmTag tag)
+  liftDb $ insert_ (StoredFarmTag tag)
 
 unsafeStoreIngredientTag :: IngredientTag -> SystemM ()
 unsafeStoreIngredientTag tag = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  flip runSqlPool systemEnvDatabase $ do
-    insert_ (StoredIngredientTag tag)
+  liftDb $ insert_ (StoredIngredientTag tag)
 
 unsafeStoreMealTag :: MealTag -> SystemM ()
 unsafeStoreMealTag tag = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  flip runSqlPool systemEnvDatabase $ do
-    insert_ (StoredMealTag tag)
+  liftDb $ insert_ (StoredMealTag tag)
 
 
 -- * Safe Storage
@@ -104,8 +92,7 @@ submitTag token tag = do
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         now <- liftIO getCurrentTime
         let record = TagRecord tag
         insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
@@ -162,9 +149,8 @@ searchGeneric fromRecord index term = do
   xs' <- liftIO (query config index term)
   case xs' of
     Ok xs -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
       let ks = (toSqlKey . documentId) <$> matches xs
-      flip runSqlPool systemEnvDatabase $
+      liftDb $
         fmap (Just . catMaybes) $ forM ks $ \k -> do
           mX <- get k
           pure (fromRecord <$> mX)

@@ -4,7 +4,7 @@
 
 module LocalCooking.Function.Validate where
 
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
 import LocalCooking.Database.Schema
   ( getChefId, getMenuId, getMealId, Unique (UniqueEmail), StoredUser (..))
 import LocalCooking.Common.User.Password (HashedPassword)
@@ -22,8 +22,7 @@ import Database.Persist.Class (getBy, get)
 
 uniqueEmail :: EmailAddress -> SystemM Bool
 uniqueEmail e = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftDb $ do
     mEnt <- getBy (UniqueEmail e)
     case mEnt of
       Nothing -> pure True
@@ -32,8 +31,7 @@ uniqueEmail e = do
 
 uniqueChefPermalink :: Permalink -> SystemM Bool
 uniqueChefPermalink p = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftDb $ do
     mId <- getChefId p
     pure $ case mId of
       Nothing -> False
@@ -42,8 +40,7 @@ uniqueChefPermalink p = do
 
 uniqueMenuDeadline :: Permalink -> Day -> SystemM Bool
 uniqueMenuDeadline p d = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftDb $ do
     mId <- getMenuId p d
     pure $ case mId of
       Nothing -> False
@@ -52,8 +49,7 @@ uniqueMenuDeadline p d = do
 
 uniqueMealPermalink :: Permalink -> Day -> Permalink -> SystemM Bool
 uniqueMealPermalink c d m = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftDb $ do
     mId <- getMealId c d m
     pure $ case mId of
       Nothing -> False
@@ -66,8 +62,7 @@ passwordVerify authToken pw = do
   case mUserId of
     Nothing -> pure False
     Just userId -> do
-      SystemEnv{systemEnvDatabase} <- getSystemEnv
-      liftIO $ flip runSqlPool systemEnvDatabase $ do
+      liftDb $ do
         mUser <- get userId
         case mUser of
           Nothing -> pure False
@@ -76,8 +71,7 @@ passwordVerify authToken pw = do
 
 passwordVerifyUnauth :: EmailAddress -> HashedPassword -> SystemM Bool
 passwordVerifyUnauth email pw = do
-  SystemEnv{systemEnvDatabase} <- getSystemEnv
-  liftIO $ flip runSqlPool systemEnvDatabase $ do
+  liftDb $ do
     mUserId <- getBy (UniqueEmail email)
     case mUserId of
       Nothing -> pure False
