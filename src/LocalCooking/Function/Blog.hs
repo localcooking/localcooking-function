@@ -18,6 +18,7 @@ module LocalCooking.Function.Blog
 
 import LocalCooking.Function.System
   (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
+import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Blog
   ( GetBlogPost (GetBlogPost), NewBlogPost (NewBlogPost), SetBlogPost (SetBlogPost)
   , BlogPostSynopsis (..), BlogPostCategorySynopsis (..), GetBlogPostCategory (..)
@@ -26,6 +27,7 @@ import LocalCooking.Semantics.Blog
 import qualified LocalCooking.Semantics.Blog as Blog
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
+import LocalCooking.Common.Blog (BlogPostVariant)
 import LocalCooking.Database.Schema
   ( hasRole, StoredBlogPost (..), StoredBlogPostCategory (..), StoredBlogPostPrimary (..)
   , StoredBlogPostId, StoredEditor (..), StoredEditorId
@@ -39,7 +41,8 @@ import LocalCooking.Database.Schema
     , StoredBlogPostCategory', StoredBlogPostPriority, StoredBlogPostCategoryPriority
     , StoredBlogPostCategoryPriority, StoredBlogPostPrimaryCategory
     , StoredBlogPostCategoryName, StoredBlogPostCategoryPermalink
-    , StoredBlogPostPrimaryPost, StoredBlogPostVariant, StoredBlogPostAuthor
+    , StoredBlogPostPrimaryPost, StoredBlogPostAuthor
+    , StoredBlogPostCategoryVariant
     )
   )
 
@@ -59,18 +62,20 @@ import Database.Persist.Class
 -- * Category
 
 
-getBlogPostCategories :: ReaderT SqlBackend IO [BlogPostCategorySynopsis]
-getBlogPostCategories = do
-  xs <- selectList [] [Asc StoredBlogPostCategoryPriority]
-  pure $ (\(Entity _ (StoredBlogPostCategory name priority permalink)) ->
+getBlogPostCategories :: BlogPostVariant -> ReaderT SqlBackend IO [BlogPostCategorySynopsis]
+getBlogPostCategories variant = do
+  xs <- selectList
+    [StoredBlogPostCategoryVariant ==. variant]
+    [Asc StoredBlogPostCategoryPriority]
+  pure $ (\(Entity _ (StoredBlogPostCategory name priority permalink _)) ->
             BlogPostCategorySynopsis name permalink priority) <$> xs
 
-getBlogPostCategory :: Permalink -> ReaderT SqlBackend IO (Maybe GetBlogPostCategory)
-getBlogPostCategory permalink = do
-  mEnt <- getBy (UniqueBlogPostCategory permalink)
+getBlogPostCategory :: BlogPostVariant -> Permalink -> ReaderT SqlBackend IO (Maybe GetBlogPostCategory)
+getBlogPostCategory variant permalink = do
+  mEnt <- getBy (UniqueBlogPostCategory variant permalink)
   case mEnt of
     Nothing -> pure Nothing
-    Just (Entity categoryId (StoredBlogPostCategory name _ _)) -> do
+    Just (Entity categoryId (StoredBlogPostCategory name _ _ _)) -> do
       primary <- do
         mPrimary <- selectFirst [StoredBlogPostPrimaryCategory ==. categoryId] []
         case mPrimary of
@@ -79,7 +84,7 @@ getBlogPostCategory permalink = do
       posts <- do
         xs <- selectList [StoredBlogPostCategory' ==. categoryId] [Asc StoredBlogPostPriority]
         fmap catMaybes $ forM xs $ \(Entity postId _) -> getBlogPostSynopsisById postId
-      pure $ Just $ GetBlogPostCategory name permalink primary posts categoryId
+      pure $ Just $ GetBlogPostCategory name permalink primary posts variant categoryId
 
 newBlogPostCategory :: AuthToken -> NewBlogPostCategory -> SystemM (Maybe StoredBlogPostCategoryId)
 newBlogPostCategory authToken NewBlogPostCategory{..} = do
@@ -88,11 +93,15 @@ newBlogPostCategory authToken NewBlogPostCategory{..} = do
     Nothing -> pure Nothing
     Just _ -> do
       liftDb $ do
-        mEnt <- getBy (UniqueBlogPostCategory newBlogPostCategoryPermalink)
+        mEnt <- getBy (UniqueBlogPostCategory newBlogPostCategoryVariant newBlogPostCategoryPermalink)
         case mEnt of
           Just _ -> pure Nothing
-          Nothing -> do
-            Just <$> insert (StoredBlogPostCategory newBlogPostCategoryName newBlogPostCategoryPriority newBlogPostCategoryPermalink)
+          Nothing -> fmap Just $ insert $ StoredBlogPostCategory
+            newBlogPostCategoryName
+            newBlogPostCategoryPriority
+            newBlogPostCategoryPermalink
+            newBlogPostCategoryVariant
+
 
 setBlogPostCategory :: AuthToken -> SetBlogPostCategory -> SystemM Bool
 setBlogPostCategory authToken SetBlogPostCategory{..} = do
@@ -104,24 +113,31 @@ setBlogPostCategory authToken SetBlogPostCategory{..} = do
         mEnt <- get setBlogPostCategoryId
         case mEnt of
           Nothing -> pure False
-          Just _ -> True <$ update setBlogPostCategoryId
-            [ StoredBlogPostCategoryName =. setBlogPostCategoryName
-            , StoredBlogPostCategoryPriority =. setBlogPostCategoryPriority
-            , StoredBlogPostCategoryPermalink =. setBlogPostCategoryPermalink
-            ]
+          Just _ -> do
+            mExisting <- getBy (UniqueBlogPostCategory setBlogPostCategoryVariant setBlogPostCategoryPermalink)
+            case mExisting of
+              Just _ -> pure False
+              Nothing -> do
+                True <$ update setBlogPostCategoryId
+                  [ StoredBlogPostCategoryName =. setBlogPostCategoryName
+                  , StoredBlogPostCategoryPriority =. setBlogPostCategoryPriority
+                  , StoredBlogPostCategoryPermalink =. setBlogPostCategoryPermalink
+                  , StoredBlogPostCategoryVariant =. setBlogPostCategoryVariant
+                  ]
 
 
 -- * Post
 
-getBlogPosts :: Permalink -- ^ Category
+-- TODO order by priority
+getBlogPosts :: BlogPostVariant -> Permalink -- ^ Category
              -> ReaderT SqlBackend IO [BlogPostSynopsis]
-getBlogPosts category = do
-  mCat <- getBy (UniqueBlogPostCategory category)
+getBlogPosts variant category = do
+  mCat <- getBy (UniqueBlogPostCategory variant category)
   case mCat of
     Nothing -> pure []
     Just (Entity categoryId _) -> do
       ents <- selectList [StoredBlogPostCategory' ==. categoryId] []
-      fmap catMaybes $ forM ents $ \(Entity _ (StoredBlogPost author timestamp headline permalink _ variant priority _)) -> do
+      fmap catMaybes $ forM ents $ \(Entity _ (StoredBlogPost author timestamp headline permalink _ priority _)) -> do
         mAuthor <- get author
         case mAuthor of
           Nothing -> pure Nothing
@@ -130,22 +146,20 @@ getBlogPosts category = do
             , blogPostSynopsisTimestamp = timestamp
             , blogPostSynopsisHeadline = headline
             , blogPostSynopsisPermalink = permalink
-            , blogPostSynopsisVariant = variant
             , blogPostSynopsisPriority = priority
             }
 
-getBlogPost :: Permalink -- ^ Category
-            -> Permalink -- ^ Post
+getBlogPost :: WithId BlogPostVariant (WithId Permalink Permalink)
             -> ReaderT SqlBackend IO (Maybe GetBlogPost)
-getBlogPost category permalink = do
-  mCat <- getBy (UniqueBlogPostCategory category)
+getBlogPost (WithId variant (WithId category permalink)) = do
+  mCat <- getBy (UniqueBlogPostCategory variant category)
   case mCat of
     Nothing -> pure Nothing
-    Just (Entity categoryId (StoredBlogPostCategory categoryName _ _)) -> do
+    Just (Entity categoryId (StoredBlogPostCategory categoryName _ _ _)) -> do
       mEnt <- getBy (UniqueBlogPost categoryId permalink)
       case mEnt of
         Nothing -> pure Nothing
-        Just (Entity postId (StoredBlogPost author timestamp headline _ content variant priority _)) -> do
+        Just (Entity postId (StoredBlogPost author timestamp headline _ content priority _)) -> do
           mAuthor <- get author
           case mAuthor of
             Nothing -> pure Nothing
@@ -156,7 +170,6 @@ getBlogPost category permalink = do
                 , Blog.getBlogPostHeadline = headline
                 , Blog.getBlogPostPermalink = permalink
                 , Blog.getBlogPostContent = content
-                , Blog.getBlogPostVariant = variant
                 , Blog.getBlogPostPriority = priority
                 , Blog.getBlogPostCategory = categoryName
                 , Blog.getBlogPostId = postId
@@ -180,7 +193,6 @@ newBlogPost authToken NewBlogPost{..} = do
                   newBlogPostHeadline
                   newBlogPostPermalink
                   newBlogPostContent
-                  newBlogPostVariant
                   newBlogPostPriority
                   newBlogPostCategory
             if newBlogPostPrimary
@@ -205,7 +217,7 @@ setBlogPost authToken SetBlogPost{..} = do
         mPost <- get setBlogPostId
         case mPost of
           Nothing -> pure False
-          Just (StoredBlogPost _ _ _ _ _ _ _ category) -> do
+          Just (StoredBlogPost _ _ _ _ _ _ category) -> do
             let updatePost = do
                   mPrimary <- getBy (UniqueBlogPost category setBlogPostPermalink)
                   case mPrimary of
@@ -216,7 +228,6 @@ setBlogPost authToken SetBlogPost{..} = do
                         , StoredBlogPostHeadline =. setBlogPostHeadline
                         , StoredBlogPostPermalink =. setBlogPostPermalink
                         , StoredBlogPostContent =. setBlogPostContent
-                        , StoredBlogPostVariant =. setBlogPostVariant
                         , StoredBlogPostPriority =. setBlogPostPriority
                         ]
                       pure True
@@ -245,13 +256,13 @@ getBlogPostSynopsisById k = do
   mPost <- get k
   case mPost of
     Nothing -> pure Nothing
-    Just (StoredBlogPost author timestamp headline permalink _ variant priority _) -> do
+    Just (StoredBlogPost author timestamp headline permalink _ priority _) -> do
       mEditor <- get author
       case mEditor of
         Nothing -> pure Nothing
         Just (StoredEditor _ name) ->
           pure $ Just $
-            BlogPostSynopsis name timestamp headline permalink variant priority
+            BlogPostSynopsis name timestamp headline permalink priority
 
 
 verifyEditorhood :: AuthToken -> SystemM (Maybe StoredEditorId)
