@@ -18,7 +18,6 @@ module LocalCooking.Function.Blog
 
 import LocalCooking.Function.System
   (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
-import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Blog
   ( GetBlogPost (GetBlogPost), NewBlogPost (NewBlogPost), SetBlogPost (SetBlogPost)
   , BlogPostSynopsis (..), BlogPostCategorySynopsis (..), GetBlogPostCategory (..)
@@ -49,6 +48,7 @@ import LocalCooking.Database.Schema
 import Data.Maybe (catMaybes)
 import Data.Time (getCurrentTime)
 import Data.Text.Permalink (Permalink)
+import Data.Aeson.JSONTuple (JSONTuple (..))
 import Control.Monad (forM)
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -149,9 +149,9 @@ getBlogPosts variant category = do
             , blogPostSynopsisPriority = priority
             }
 
-getBlogPost :: WithId BlogPostVariant (WithId Permalink Permalink)
+getBlogPost :: JSONTuple BlogPostVariant (JSONTuple Permalink Permalink)
             -> ReaderT SqlBackend IO (Maybe GetBlogPost)
-getBlogPost (WithId variant (WithId category permalink)) = do
+getBlogPost (JSONTuple variant (JSONTuple category permalink)) = do
   mCat <- getBy (UniqueBlogPostCategory variant category)
   case mCat of
     Nothing -> pure Nothing

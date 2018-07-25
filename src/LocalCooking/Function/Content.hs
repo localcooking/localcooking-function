@@ -16,7 +16,6 @@ import LocalCooking.Function.Mitch
   ( unsafeStoreCustomer, validateCustomer
   )
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
-import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Content
   ( SetEditor (..), EditorValid (..), GetRecordSubmissionPolicy (..))
 import LocalCooking.Semantics.Content.Approval
@@ -59,6 +58,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Monoid ((<>))
 import Data.Time (getCurrentTime)
+import Data.Aeson.JSONTuple (JSONTuple (..))
 import Control.Monad (forM, void)
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -229,7 +229,7 @@ integrateRecord authToken submissionId = do
 
 
 
-getSubmissions :: AuthToken -> ContentRecordVariant -> SystemM (Maybe [WithId StoredRecordSubmissionId GetRecordSubmission])
+getSubmissions :: AuthToken -> ContentRecordVariant -> SystemM (Maybe [JSONTuple StoredRecordSubmissionId GetRecordSubmission])
 getSubmissions authToken variant = do
   mEditor <- verifyEditorhood authToken
   case mEditor of
@@ -241,7 +241,7 @@ getSubmissions authToken variant = do
           approvals <- do
             ys <- selectList [RecordSubmissionApprovalRecord ==. submissionId] []
             pure $ (\(Entity _ (RecordSubmissionApproval _ e)) -> e) <$> ys
-          pure $ WithId submissionId $ GetRecordSubmission author timestamp content approvals
+          pure $ JSONTuple submissionId $ GetRecordSubmission author timestamp content approvals
 
 
 

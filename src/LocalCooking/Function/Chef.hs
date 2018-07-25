@@ -18,7 +18,6 @@ import LocalCooking.Function.Semantics
   )
 import LocalCooking.Function.System
   (SystemM, SystemEnv (..), getUserId, getSystemEnv)
-import LocalCooking.Semantics.Common (WithId (..))
 import LocalCooking.Semantics.Chef
   ( SetChef (..), ChefValid (..), MenuSettings (..), MealSettings (..)
   )
@@ -58,6 +57,7 @@ import LocalCooking.Database.Schema.Content
 
 import Data.Maybe (catMaybes)
 import Data.Time (getCurrentTime)
+import Data.Aeson.JSONTuple (JSONTuple (..))
 import Control.Monad (forM_, forM)
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -106,7 +106,7 @@ getChef authToken = do
   mChef <- getChefFromAuthToken authToken
   case mChef of
     Nothing -> pure Nothing
-    Just (WithId chefId (StoredChef _ name permalink bio images avatar)) -> do
+    Just (JSONTuple chefId (StoredChef _ name permalink bio images avatar)) -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mTags <- getChefTags chefId
@@ -143,7 +143,7 @@ unsafeStoreChef userId ChefValid{..} = do
           Nothing -> pure ()
           Just (Entity chefTagId _) -> insert_ (ChefTagRelation chefId chefTagId)
       pure (Just chefId)
-    Just (WithId chefId _) -> do
+    Just (JSONTuple chefId _) -> do
       update chefId
         [ StoredChefName =. chefValidName
         , StoredChefPermalink =. chefValidPermalink
@@ -171,12 +171,12 @@ setChef authToken setChef' = do
 
 
 -- | Lookup all of a chef's own menus
-getMenus :: AuthToken -> SystemM (Maybe [WithId StoredMenuId MenuSettings])
+getMenus :: AuthToken -> SystemM (Maybe [JSONTuple StoredMenuId MenuSettings])
 getMenus authToken = do
   mChef <- getChefFromAuthToken authToken
   case mChef of
     Nothing -> pure Nothing
-    Just (WithId chefId _) -> do
+    Just (JSONTuple chefId _) -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         xs <- selectList [StoredMenuAuthor ==. chefId] []
@@ -186,7 +186,7 @@ getMenus authToken = do
               case mTags of
                 Nothing -> pure Nothing
                 Just tags ->
-                  pure $ Just $ WithId
+                  pure $ Just $ JSONTuple
                     menuId
                     MenuSettings
                     { menuSettingsPublished = pub
@@ -204,7 +204,7 @@ unsafeStoreNewMenu userId MenuSettings{..} = do
   mChef <- getChefFromUserId userId
   case mChef of
     Nothing -> pure Nothing
-    Just (WithId chefId _) -> do
+    Just (JSONTuple chefId _) -> do
       SystemEnv{systemEnvDatabase} <- getSystemEnv
       liftIO $ flip runSqlPool systemEnvDatabase $ do
         mEnt <- getBy (UniqueMenuDeadline chefId menuSettingsDeadline)
@@ -246,8 +246,8 @@ newMenu authToken menu = do
 
 
 -- | Physically store a chef's adjusted menu into the database.
-unsafeStoreSetMenu :: StoredUserId -> WithId StoredMenuId MenuSettings -> SystemM Bool
-unsafeStoreSetMenu userId (WithId menuId MenuSettings{..}) = do
+unsafeStoreSetMenu :: StoredUserId -> JSONTuple StoredMenuId MenuSettings -> SystemM Bool
+unsafeStoreSetMenu userId (JSONTuple menuId MenuSettings{..}) = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO $ flip runSqlPool systemEnvDatabase $ do
     isAuthorized <- hasRole userId Chef
@@ -270,7 +270,7 @@ unsafeStoreSetMenu userId (WithId menuId MenuSettings{..}) = do
 
 
 -- | Marhsall a user-supplied adjustment to a chef's menu into the content submission system
-setMenu :: AuthToken -> WithId StoredMenuId MenuSettings -> SystemM Bool
+setMenu :: AuthToken -> JSONTuple StoredMenuId MenuSettings -> SystemM Bool
 setMenu authToken menu = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
@@ -289,7 +289,7 @@ setMenu authToken menu = do
 
 
 -- | Lookup all of the meals in a chef's own menu
-getMeals :: AuthToken -> StoredMenuId -> SystemM (Maybe [WithId StoredMealId MealSettings])
+getMeals :: AuthToken -> StoredMenuId -> SystemM (Maybe [JSONTuple StoredMealId MealSettings])
 getMeals authToken menuId = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
@@ -308,7 +308,7 @@ getMeals authToken menuId = do
                 case mIngDiets of
                   Nothing -> pure Nothing
                   Just (ings,_) ->
-                    pure $ Just $ WithId
+                    pure $ Just $ JSONTuple
                       mealId
                       MealSettings
                       { mealSettingsTitle = title
@@ -324,8 +324,8 @@ getMeals authToken menuId = do
 
 
 -- | Physically store a chef's new meal into the database.
-unsafeStoreNewMeal :: StoredUserId -> WithId StoredMenuId MealSettings -> SystemM (Maybe StoredMealId)
-unsafeStoreNewMeal userId (WithId menuId MealSettings{..}) = do
+unsafeStoreNewMeal :: StoredUserId -> JSONTuple StoredMenuId MealSettings -> SystemM (Maybe StoredMealId)
+unsafeStoreNewMeal userId (JSONTuple menuId MealSettings{..}) = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO $ flip runSqlPool systemEnvDatabase $ do
     isAuthorized <- hasRole userId Chef
@@ -359,7 +359,7 @@ unsafeStoreNewMeal userId (WithId menuId MealSettings{..}) = do
 
 
 -- | Marhsall a user-supplied chef's new meal into the content submission system
-newMeal :: AuthToken -> WithId StoredMenuId MealSettings -> SystemM Bool
+newMeal :: AuthToken -> JSONTuple StoredMenuId MealSettings -> SystemM Bool
 newMeal authToken meal = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
@@ -378,8 +378,8 @@ newMeal authToken meal = do
 
 
 -- | Physically store a chef's adjusted meal into the database.
-unsafeStoreSetMeal :: StoredUserId -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
-unsafeStoreSetMeal userId (WithId menuId (WithId mealId MealSettings{..})) = do
+unsafeStoreSetMeal :: StoredUserId -> JSONTuple StoredMenuId (JSONTuple StoredMealId MealSettings) -> SystemM Bool
+unsafeStoreSetMeal userId (JSONTuple menuId (JSONTuple mealId MealSettings{..})) = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO $ flip runSqlPool systemEnvDatabase $ do
     isAuthorized <- hasRole userId Chef
@@ -406,7 +406,7 @@ unsafeStoreSetMeal userId (WithId menuId (WithId mealId MealSettings{..})) = do
 
 
 -- | Marhsall a user-supplied chef's adjusted meal into the content submission system
-setMeal :: AuthToken -> WithId StoredMenuId (WithId StoredMealId MealSettings) -> SystemM Bool
+setMeal :: AuthToken -> JSONTuple StoredMenuId (JSONTuple StoredMealId MealSettings) -> SystemM Bool
 setMeal authToken meal = do
   isAuthorized <- verifyChefhood authToken
   if not isAuthorized
@@ -441,7 +441,7 @@ verifyChefhood authToken = do
       liftIO $ flip runSqlPool systemEnvDatabase $ hasRole userId Chef
 
 -- | Obtain a chef's profile identified by a login session
-getChefFromAuthToken :: AuthToken -> SystemM (Maybe (WithId StoredChefId StoredChef))
+getChefFromAuthToken :: AuthToken -> SystemM (Maybe (JSONTuple StoredChefId StoredChef))
 getChefFromAuthToken authToken = do
   mUserId <- getUserId authToken
   case mUserId of
@@ -449,7 +449,7 @@ getChefFromAuthToken authToken = do
     Just userId -> getChefFromUserId userId
 
 -- | Obtain a chef's profile identified by a user id
-getChefFromUserId :: StoredUserId -> SystemM (Maybe (WithId StoredChefId StoredChef))
+getChefFromUserId :: StoredUserId -> SystemM (Maybe (JSONTuple StoredChefId StoredChef))
 getChefFromUserId userId = do
   SystemEnv{systemEnvDatabase} <- getSystemEnv
   liftIO $ flip runSqlPool systemEnvDatabase $ do
@@ -460,4 +460,4 @@ getChefFromUserId userId = do
         mEnt <- getBy (UniqueChefOwner userId)
         case mEnt of
           Nothing -> pure Nothing
-          Just (Entity chefId chef) -> pure $ Just $ WithId chefId chef
+          Just (Entity chefId chef) -> pure $ Just $ JSONTuple chefId chef
