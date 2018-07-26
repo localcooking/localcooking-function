@@ -7,7 +7,9 @@
 
 module LocalCooking.Function.Content where
 
-import LocalCooking.Function.Tag (unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag, unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag)
+import LocalCooking.Function.Tag
+  ( unsafeStoreChefTag, unsafeStoreCultureTag, unsafeStoreDietTag
+  , unsafeStoreFarmTag, unsafeStoreIngredientTag, unsafeStoreMealTag)
 import LocalCooking.Function.Chef
   ( unsafeStoreChef, unsafeStoreNewMenu, unsafeStoreSetMenu
   , unsafeStoreNewMeal, unsafeStoreSetMeal, validateChef
@@ -15,9 +17,10 @@ import LocalCooking.Function.Chef
 import LocalCooking.Function.Mitch
   ( unsafeStoreCustomer, validateCustomer
   )
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getSystemEnv, liftDb)
 import LocalCooking.Semantics.Content
-  ( SetEditor (..), EditorValid (..), GetRecordSubmissionPolicy (..))
+  ( SetEditor (..), EditorValid (..), GetRecordSubmissionPolicy (..)
+  , SubmissionPolicy (..), SubmissionExists (..))
 import LocalCooking.Semantics.Content.Approval
   ( GetEditor (..), GetRecordSubmission (..))
 import LocalCooking.Semantics.ContentRecord
@@ -82,53 +85,41 @@ validateEditor SetEditor{..} = do
       }
 
 
-getEditor :: AuthToken -> SystemM (Maybe GetEditor)
-getEditor authToken = do
-  mUserId <- getUserId authToken
-  case mUserId of
+getEditor :: AuthToken -> SystemM (UserExists (HasRole (Maybe GetEditor)))
+getEditor authToken = verifyRole EditorRole authToken $ \userId -> liftDb $ do
+  mCustEnt <- getBy (UniqueEditor userId)
+  case mCustEnt of
     Nothing -> pure Nothing
-    Just userId -> do
-      liftDb $ do
-        mCustEnt <- getBy (UniqueEditor userId)
-        case mCustEnt of
-          Nothing -> pure Nothing
-          Just (Entity editorId (StoredEditor _ name)) -> do
-            variants <- do
-              xs <- selectList [RecordAssignedSubmissionPolicyEditor ==. editorId] []
-              fmap catMaybes $ forM xs $ \(Entity _ (RecordAssignedSubmissionPolicy policyId _)) -> do
-                mPolicy <- get policyId
-                case mPolicy of
-                  Nothing -> pure Nothing
-                  Just (RecordSubmissionPolicy v _) -> pure (Just v)
-            approved <- do
-              xs <- selectList [RecordSubmissionApprovalEditor ==. editorId] []
-              forM xs $ \(Entity approvalId _) -> pure approvalId
-            pure $ Just $ GetEditor name variants approved
+    Just (Entity editorId (StoredEditor _ name)) -> do
+      variants <- do
+        xs <- selectList [RecordAssignedSubmissionPolicyEditor ==. editorId] []
+        fmap catMaybes $ forM xs $ \(Entity _ (RecordAssignedSubmissionPolicy policyId _)) -> do
+          mPolicy <- get policyId
+          case mPolicy of
+            Nothing -> pure Nothing
+            Just (RecordSubmissionPolicy v _) -> pure (Just v)
+      approved <- do
+        xs <- selectList [RecordSubmissionApprovalEditor ==. editorId] []
+        forM xs $ \(Entity approvalId _) -> pure approvalId
+      pure $ Just $ GetEditor name variants approved
 
 
-unsafeStoreEditor :: StoredUserId -> EditorValid -> SystemM Bool
+unsafeStoreEditor :: StoredUserId -> EditorValid -> ReaderT SqlBackend IO ()
 unsafeStoreEditor userId EditorValid{..} = do
-  liftDb $ do
-    mCustEnt <- getBy (UniqueEditor userId)
-    case mCustEnt of
-      Nothing -> do
-        insert_ (StoredEditor userId editorValidName)
-      Just (Entity editorId _) ->
-        update editorId [StoredEditorName =. editorValidName]
-    pure True
+  mCustEnt <- getBy (UniqueEditor userId)
+  case mCustEnt of
+    Nothing -> do
+      insert_ (StoredEditor userId editorValidName)
+    Just (Entity editorId _) ->
+      update editorId [StoredEditorName =. editorValidName]
 
 
-setEditor :: AuthToken -> SetEditor -> SystemM Bool
-setEditor authToken setEditor' = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      liftDb $ do
-        now <- liftIO getCurrentTime
-        let record = ProfileRecord (ProfileRecordEditor setEditor')
-        insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
-        pure True
+setEditor :: AuthToken -> SetEditor -> SystemM (UserExists (HasRole JSONUnit))
+setEditor authToken setEditor' = verifyRole EditorRole authToken $ \userId -> liftDb $ do
+  now <- liftIO getCurrentTime
+  let record = ProfileRecord (ProfileRecordEditor setEditor')
+  insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
+  pure JSONUnit
 
 
 getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe GetRecordSubmissionPolicy)

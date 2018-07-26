@@ -239,15 +239,3 @@ instance FromJSON Keys where
     keysSparkPost <- o .: "sparkPost"
     pure Keys{keysFacebook,keysGoogle,keysSparkPost}
   parseJSON x = typeMismatch "Keys" x
-
-
-
--- * Utils
-
-
-getUserId :: AuthToken -> SystemM (Maybe StoredUserId)
-getUserId authToken = do
-  SystemEnv{systemEnvTokenContexts} <- getSystemEnv
-  case systemEnvTokenContexts of
-    TokenContexts{tokenContextAuth} ->
-      liftIO (lookupAccess tokenContextAuth authToken)
