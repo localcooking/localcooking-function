@@ -86,44 +86,48 @@ getBlogPostCategory variant permalink = do
         fmap catMaybes $ forM xs $ \(Entity postId _) -> getBlogPostSynopsisById postId
       pure $ Just $ GetBlogPostCategory name permalink primary posts variant categoryId
 
-newBlogPostCategory :: AuthToken -> NewBlogPostCategory -> SystemM (Maybe StoredBlogPostCategoryId)
-newBlogPostCategory authToken NewBlogPostCategory{..} = do
-  mAuthor <- verifyEditorhood authToken
-  case mAuthor of
-    Nothing -> pure Nothing
-    Just _ -> do
-      liftDb $ do
-        mEnt <- getBy (UniqueBlogPostCategory newBlogPostCategoryVariant newBlogPostCategoryPermalink)
-        case mEnt of
-          Just _ -> pure Nothing
-          Nothing -> fmap Just $ insert $ StoredBlogPostCategory
-            newBlogPostCategoryName
-            newBlogPostCategoryPriority
-            newBlogPostCategoryPermalink
-            newBlogPostCategoryVariant
+
+newBlogPostCategory :: AuthToken
+                    -> NewBlogPostCategory
+                    -> SystemM
+                       ( UserExists
+                         ( HasRole
+                           ( Maybe StoredBlogPostCategoryId)))
+newBlogPostCategory authToken NewBlogPostCategory{..} =
+  verifyRole EditorRole authToken $ \userId -> liftDb $ do
+    mEnt <- getBy (UniqueBlogPostCategory newBlogPostCategoryVariant newBlogPostCategoryPermalink)
+    case mEnt of
+      Just _ -> pure Nothing
+      Nothing -> fmap Just $ insert $ StoredBlogPostCategory
+        newBlogPostCategoryName
+        newBlogPostCategoryPriority
+        newBlogPostCategoryPermalink
+        newBlogPostCategoryVariant
 
 
-setBlogPostCategory :: AuthToken -> SetBlogPostCategory -> SystemM Bool
+setBlogPostCategory :: AuthToken
+                    -> SetBlogPostCategory
+                    -> SystemM
+                       ( UserExists
+                         ( HasRole
+                           ( BlogPostCategoryExists
+                             ( BlogPostCategoryUnique JSONUnit))))
 setBlogPostCategory authToken SetBlogPostCategory{..} = do
-  mAuthor <- verifyEditorhood authToken
-  case mAuthor of
-    Nothing -> pure False
-    Just _ -> do
-      liftDb $ do
-        mEnt <- get setBlogPostCategoryId
-        case mEnt of
-          Nothing -> pure False
-          Just _ -> do
-            mExisting <- getBy (UniqueBlogPostCategory setBlogPostCategoryVariant setBlogPostCategoryPermalink)
-            case mExisting of
-              Just _ -> pure False
-              Nothing -> do
-                True <$ update setBlogPostCategoryId
-                  [ StoredBlogPostCategoryName =. setBlogPostCategoryName
-                  , StoredBlogPostCategoryPriority =. setBlogPostCategoryPriority
-                  , StoredBlogPostCategoryPermalink =. setBlogPostCategoryPermalink
-                  , StoredBlogPostCategoryVariant =. setBlogPostCategoryVariant
-                  ]
+  verifyRole EditorRole authToken $ \userId -> liftDb $ do
+    mEnt <- get setBlogPostCategoryId
+    case mEnt of
+      Nothing -> pure BlogPostCategoryDoesntExist
+      Just _ -> fmap BlogPostCategoryExists $ do
+        mExisting <- getBy (UniqueBlogPostCategory setBlogPostCategoryVariant setBlogPostCategoryPermalink)
+        case mExisting of
+          Just _ -> pure BlogPostCategoryNotUnique
+          Nothing -> do
+            JSONUnit <$ update setBlogPostCategoryId
+              [ StoredBlogPostCategoryName =. setBlogPostCategoryName
+              , StoredBlogPostCategoryPriority =. setBlogPostCategoryPriority
+              , StoredBlogPostCategoryPermalink =. setBlogPostCategoryPermalink
+              , StoredBlogPostCategoryVariant =. setBlogPostCategoryVariant
+              ]
 
 
 -- * Post
