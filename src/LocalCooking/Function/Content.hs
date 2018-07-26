@@ -122,52 +122,50 @@ setEditor authToken setEditor' = verifyRole EditorRole authToken $ \userId -> li
   pure JSONUnit
 
 
-getSubmissionPolicy :: AuthToken -> ContentRecordVariant -> SystemM (Maybe GetRecordSubmissionPolicy)
-getSubmissionPolicy authToken variant = do
-  mEditor <- verifyEditorhood authToken
-  case mEditor of
-    Nothing -> pure Nothing
-    Just _ -> do
-      liftDb $ do
+getSubmissionPolicy :: AuthToken
+                    -> ContentRecordVariant
+                    -> SystemM
+                       ( UserExists
+                         ( HasRole
+                           ( SubmissionPolicy GetRecordSubmissionPolicy)))
+getSubmissionPolicy authToken variant = verifyRole EditorRole authToken $ \_ -> liftDb $ do
+  mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
+  case mPolicy of
+    Nothing -> pure NoSubmissionPolicy
+    Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
+      assigned <- do
+        xs <- selectList [RecordAssignedSubmissionPolicyPolicy ==. policyId] []
+        pure $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
+      pure $ SubmissionPolicy $ GetRecordSubmissionPolicy variant additional assigned
+
+
+isApprovedSubmission :: AuthToken
+                     -> StoredRecordSubmissionId
+                     -> SystemM
+                        ( UserExists
+                          ( HasRole
+                            ( SubmissionExists
+                              ( SubmissionPolicy Bool))))
+isApprovedSubmission authToken submissionId =
+  verifyRole EditorRole authToken $ \_ -> liftDb $ do
+    mSubmission <- get submissionId
+    case mSubmission of
+      Nothing -> pure SubmissionDoesntExist
+      Just (StoredRecordSubmission _ _ _ variant) -> fmap SubmissionExists $ do
         mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
         case mPolicy of
-          Nothing -> do
-            warn' $ "No stored submission policy for variant: " <> T.pack (show variant)
-            pure Nothing
-          Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
-            assigned <- do
-              xs <- selectList [RecordAssignedSubmissionPolicyPolicy ==. policyId] []
-              pure $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
-            pure $ Just $ GetRecordSubmissionPolicy variant additional assigned
-
-
-isApprovedSubmission :: AuthToken -> StoredRecordSubmissionId -> SystemM (Maybe Bool)
-isApprovedSubmission authToken submissionId = do
-  mEditor <- verifyEditorhood authToken
-  case mEditor of
-    Nothing -> pure Nothing
-    Just _ -> do
-      liftDb $ do
-        mSubmission <- get submissionId
-        case mSubmission of
-          Nothing -> pure Nothing
-          Just (StoredRecordSubmission _ _ _ variant) -> do
-            mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
-            case mPolicy of
-              Nothing -> pure Nothing
-              Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
-                assignees <- do
-                  xs <- selectList [RecordAssignedSubmissionPolicyPolicy ==. policyId] []
-                  pure $ Set.fromList $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
-                approved <- do
-                  as <- selectList [RecordSubmissionApprovalRecord ==. submissionId] []
-                  pure $ Set.fromList $ (\(Entity _ (RecordSubmissionApproval _ editor)) -> editor) <$> as
-                let needingApproval = assignees `Set.difference` approved
-                    extraApproval = approved `Set.difference` assignees
-                pure $ Just $
-                  if Set.null needingApproval
-                    then Set.size extraApproval >= additional
-                    else False
+          Nothing -> pure NoSubmissionPolicy
+          Just (Entity policyId (RecordSubmissionPolicy _ additional)) ->
+            fmap SubmissionPolicy $ do
+              assignees <- do
+                xs <- selectList [RecordAssignedSubmissionPolicyPolicy ==. policyId] []
+                pure $ Set.fromList $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
+              approved <- do
+                as <- selectList [RecordSubmissionApprovalRecord ==. submissionId] []
+                pure $ Set.fromList $ (\(Entity _ (RecordSubmissionApproval _ editor)) -> editor) <$> as
+              let needingApproval = assignees `Set.difference` approved
+                  extraApproval = approved `Set.difference` assignees
+              pure $ Set.null needingApproval && Set.size extraApproval >= additional
 
 
 integrateRecord :: AuthToken -> StoredRecordSubmissionId -> SystemM Bool
