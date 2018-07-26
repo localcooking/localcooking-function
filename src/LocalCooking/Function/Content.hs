@@ -168,53 +168,60 @@ isApprovedSubmission authToken submissionId =
               pure $ Set.null needingApproval && Set.size extraApproval >= additional
 
 
-integrateRecord :: AuthToken -> StoredRecordSubmissionId -> SystemM Bool
+integrateRecord :: AuthToken
+                -> StoredRecordSubmissionId
+                -> SystemM
+                   ( UserExists
+                     ( HasRole
+                       ( SubmissionExists
+                         ( SubmissionPolicy Bool))))
 integrateRecord authToken submissionId = do
   mIsVerified <- isApprovedSubmission authToken submissionId
   case mIsVerified of
-    Nothing -> pure False
-    Just isVerified
-      | not isVerified -> pure False
-      | otherwise -> do
-      mUserRec <- liftDb $ do
-        mSub <- get submissionId
-        case mSub of
-          Nothing -> pure Nothing
-          Just (StoredRecordSubmission author _ record _) -> pure $ Just (author, record)
-      case mUserRec of
-        Nothing -> pure False
-        Just (userId, record) -> do
-          case record of
-            TagRecord tagRecord -> case tagRecord of
-              TagRecordChef chefTag             -> unsafeStoreChefTag chefTag
-              TagRecordCulture cultureTag       -> unsafeStoreCultureTag cultureTag
-              TagRecordDiet dietTag             -> unsafeStoreDietTag dietTag
-              TagRecordFarm farmTag             -> unsafeStoreFarmTag farmTag
-              TagRecordIngredient ingredientTag -> unsafeStoreIngredientTag ingredientTag
-              TagRecordMeal mealTag             -> unsafeStoreMealTag mealTag
-            ChefRecord chefRecord -> case chefRecord of
-              ChefRecordNewMenu newMenu -> void $ unsafeStoreNewMenu userId newMenu
-              ChefRecordSetMenu setMenu -> void $ unsafeStoreSetMenu userId setMenu
-              ChefRecordNewMeal newMeal -> void $ unsafeStoreNewMeal userId newMeal
-              ChefRecordSetMeal setMeal -> void $ unsafeStoreSetMeal userId setMeal
-            ProfileRecord profileRecord -> case profileRecord of
-              ProfileRecordChef setChef -> do
-                mChefValid <- liftDb $ validateChef setChef
-                case mChefValid of
-                  Left _ -> pure () -- FIXME error somehow?
-                  Right chefValid -> void $ unsafeStoreChef userId chefValid
-              ProfileRecordCustomer setCustomer -> do
-                mCustomerValid <- liftDb $ validateCustomer setCustomer
-                case mCustomerValid of
-                  Left _ -> pure () -- FIXME error somehow?
-                  Right customerValid -> void $ unsafeStoreCustomer userId customerValid
-              ProfileRecordEditor setEditor -> do
-                mEditorValid <- liftDb $ validateEditor setEditor
-                case mEditorValid of
-                  Left _ -> pure () -- FIXME error somehow?
-                  Right editorValid -> void $ unsafeStoreEditor userId editorValid
-          liftDb $ delete submissionId
-          pure True
+    UserExists (HasRole (SubmissionExists (SubmissionPolicy isVerified))) ->
+      fmap (UserExists . HasRole . SubmissionExists . SubmissionPolicy) $
+        if not isVerified
+          then pure False
+          else do
+            mUserRec <- liftDb $ do
+              mSub <- get submissionId
+              case mSub of
+                Nothing -> pure Nothing
+                Just (StoredRecordSubmission author _ record _) -> pure $ Just (author, record)
+            case mUserRec of
+              Nothing -> pure False
+              Just (userId, record) -> do
+                case record of
+                  TagRecord tagRecord -> case tagRecord of
+                    TagRecordChef chefTag             -> unsafeStoreChefTag chefTag
+                    TagRecordCulture cultureTag       -> unsafeStoreCultureTag cultureTag
+                    TagRecordDiet dietTag             -> unsafeStoreDietTag dietTag
+                    TagRecordFarm farmTag             -> unsafeStoreFarmTag farmTag
+                    TagRecordIngredient ingredientTag -> unsafeStoreIngredientTag ingredientTag
+                    TagRecordMeal mealTag             -> unsafeStoreMealTag mealTag
+                  ChefRecord chefRecord -> case chefRecord of
+                    ChefRecordNewMenu newMenu -> void $ unsafeStoreNewMenu userId newMenu
+                    ChefRecordSetMenu setMenu -> void $ unsafeStoreSetMenu userId setMenu
+                    ChefRecordNewMeal newMeal -> void $ unsafeStoreNewMeal userId newMeal
+                    ChefRecordSetMeal setMeal -> void $ unsafeStoreSetMeal userId setMeal
+                  ProfileRecord profileRecord -> case profileRecord of
+                    ProfileRecordChef setChef -> do
+                      mChefValid <- liftDb $ validateChef setChef
+                      case mChefValid of
+                        Left _ -> pure () -- FIXME error somehow?
+                        Right chefValid -> void $ unsafeStoreChef userId chefValid
+                    ProfileRecordCustomer setCustomer -> do
+                      mCustomerValid <- liftDb $ validateCustomer setCustomer
+                      case mCustomerValid of
+                        Left _ -> pure () -- FIXME error somehow?
+                        Right customerValid -> void $ unsafeStoreCustomer userId customerValid
+                    ProfileRecordEditor setEditor -> do
+                      mEditorValid <- liftDb $ validateEditor setEditor
+                      case mEditorValid of
+                        Left _ -> pure () -- FIXME error somehow?
+                        Right editorValid -> void $ unsafeStoreEditor userId editorValid
+                liftDb $ delete submissionId
+                pure True
 
 
 
