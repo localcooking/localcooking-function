@@ -1,9 +1,17 @@
+{-# LANGUAGE
+    NamedFieldPuns
+  #-}
+
 module LocalCooking.Function.User where
 
-import LocalCooking.Function.System (getUserId, liftDb)
+import LocalCooking.Function.System
+  (SystemM, liftDb, TokenContexts (..), SystemEnv (..), getSystemEnv)
+import LocalCooking.Function.System.AccessToken (lookupAccess)
 import LocalCooking.Semantics.User (HasRole (..), UserExists (..))
-import LocalCooking.Database.Schema (hasRole)
+import LocalCooking.Database.Schema (hasRole, StoredUserId)
 import LocalCooking.Common.User.Role (UserRole)
+import LocalCooking.Common.AccessToken.Auth (AuthToken)
+import Control.Monad.IO.Class (liftIO)
 
 
 
@@ -25,9 +33,9 @@ verifyRole :: UserRole
 verifyRole role authToken fX = do
   mUserId <- getUserId authToken
   case mUserId of
-    UserExists userId -> do
-      isEditor $ liftDb $ hasRole userId Editor
+    UserExists userId -> fmap UserExists $ do
+      isEditor <- liftDb (hasRole userId role)
       if not isEditor
-        then pure (UserExists DoesntHaveRole)
-        else (\f -> UserExists $ HasRole $ f userId) <$> fX
-    _ -> pure mUserId
+        then pure DoesntHaveRole
+        else (\f -> HasRole $ f userId) <$> fX
+    UserDoesntExist -> pure UserDoesntExist

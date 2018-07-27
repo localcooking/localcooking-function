@@ -16,7 +16,6 @@ module LocalCooking.Function.System
   , Managers (..)
   , TokenContexts (..)
   , Keys (..)
-  , getUserId
   , getSystemEnv
   , liftDb -- FIXME use everywhere
   ) where

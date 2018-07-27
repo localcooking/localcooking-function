@@ -17,11 +17,13 @@ module LocalCooking.Function.Tag
   ) where
 
 import LocalCooking.Function.System
-  (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
+  (SystemM, SystemEnv (..), getSystemEnv, liftDb)
+import LocalCooking.Function.User (getUserId)
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (TagRecord), contentRecordVariant
   , TagRecord (..)
   )
+import LocalCooking.Semantics.User (UserExists (..))
 import LocalCooking.Database.Schema
   ( StoredChefTag (..), StoredCultureTag (..)
   , StoredDietTag (..), StoredFarmTag (..)
@@ -43,6 +45,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Monoid ((<>))
 import Data.Maybe (catMaybes)
+import Data.Aeson.JSONUnit (JSONUnit (..))
 import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
 import Control.Logging (log')
@@ -86,35 +89,34 @@ unsafeStoreMealTag tag = do
 -- * Safe Storage
 
 -- | As a content record submission
-submitTag :: AuthToken -> TagRecord -> SystemM Bool
+submitTag :: AuthToken -> TagRecord -> SystemM (UserExists JSONUnit)
 submitTag token tag = do
   mUserId <- getUserId token
   case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      liftDb $ do
-        now <- liftIO getCurrentTime
-        let record = TagRecord tag
-        insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
-        pure True
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> fmap UserExists $ liftDb $ do
+      now <- liftIO getCurrentTime
+      let record = TagRecord tag
+      insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
+      pure JSONUnit
 
 
-submitChefTag :: AuthToken -> ChefTag -> SystemM Bool
+submitChefTag :: AuthToken -> ChefTag -> SystemM (UserExists JSONUnit)
 submitChefTag token = submitTag token . TagRecordChef
 
-submitCultureTag :: AuthToken -> CultureTag -> SystemM Bool
+submitCultureTag :: AuthToken -> CultureTag -> SystemM (UserExists JSONUnit)
 submitCultureTag token = submitTag token . TagRecordCulture
 
-submitDietTag :: AuthToken -> DietTag -> SystemM Bool
+submitDietTag :: AuthToken -> DietTag -> SystemM (UserExists JSONUnit)
 submitDietTag token = submitTag token . TagRecordDiet
 
-submitFarmTag :: AuthToken -> FarmTag -> SystemM Bool
+submitFarmTag :: AuthToken -> FarmTag -> SystemM (UserExists JSONUnit)
 submitFarmTag token = submitTag token . TagRecordFarm
 
-submitIngredientTag :: AuthToken -> IngredientTag -> SystemM Bool
+submitIngredientTag :: AuthToken -> IngredientTag -> SystemM (UserExists JSONUnit)
 submitIngredientTag token = submitTag token . TagRecordIngredient
 
-submitMealTag :: AuthToken -> MealTag -> SystemM Bool
+submitMealTag :: AuthToken -> MealTag -> SystemM (UserExists JSONUnit)
 submitMealTag token = submitTag token . TagRecordMeal
 
 
