@@ -24,6 +24,7 @@ import LocalCooking.Semantics.Mitch
   , MealSynopsis (..), Meal (..)
   , Order (..), CartEntry (..)
   , getReviewSynopsis
+  , CustomerExists (..)
   )
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (ProfileRecord), ProfileRecord (ProfileRecordCustomer)
@@ -32,8 +33,9 @@ import LocalCooking.Semantics.ContentRecord
 import LocalCooking.Function.Semantics
   ( getMealIngredientsDiets, getMealTags, getMenuTags, getChefTags
   , assignAllergies, assignDiets, getCustDiets, getCustAllergies)
-import LocalCooking.Function.System (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
+import LocalCooking.Function.System (SystemM, SystemEnv (..), getSystemEnv, liftDb)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
+import LocalCooking.Function.User (getUserId)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
 import qualified LocalCooking.Common.User.Role as UserRole
@@ -100,173 +102,176 @@ validateCustomer SetCustomer{..} =
 
 
 -- | Witness the stored customer profile of a logged-in user
-getCustomer :: AuthToken -> SystemM (Maybe CustomerValid)
+getCustomer :: AuthToken
+            -> SystemM
+               ( UserExists
+                 ( CustomerExists CustomerValid))
 getCustomer authToken = do
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure Nothing
-    Just userId -> do
-      liftDb $ do
-        mCustEnt <- getBy (UniqueCustomer userId)
-        case mCustEnt of
-          Nothing -> pure Nothing
-          Just (Entity _ (StoredCustomer _ name address)) ->
-            pure $ Just $ CustomerValid
-              name
-              address
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> fmap UserExists $ liftDb $ do
+      mCustEnt <- getBy (UniqueCustomer userId)
+      case mCustEnt of
+        Nothing -> pure CustomerDoesntExist
+        Just (Entity _ (StoredCustomer _ name address)) ->
+          pure $ CustomerExists $ CustomerValid
+            name
+            address
 
 
 -- | Physically store the content of a `CustomerValid` data-view into the database
-unsafeStoreCustomer :: StoredUserId -> CustomerValid -> SystemM Bool
+unsafeStoreCustomer :: StoredUserId -> CustomerValid -> SystemM ()
 unsafeStoreCustomer userId CustomerValid{..} = do
   liftDb $ do
     mCustEnt <- getBy (UniqueCustomer userId)
     case mCustEnt of
       Nothing -> do
         insert_ (StoredCustomer userId customerValidName customerValidAddress)
-        pure True
       Just (Entity custId _) -> do
         update custId
           [ StoredCustomerName =. customerValidName
           , StoredCustomerAddress =. customerValidAddress
           ]
-        pure True
 
 
 -- | Marshall a user-supplied customer profile into the content submission system
-setCustomer :: AuthToken -> SetCustomer -> SystemM Bool
+setCustomer :: AuthToken -> SetCustomer -> SystemM (UserExists JSONUnit)
 setCustomer authToken setCustomer' = do
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      liftDb $ do
-        now <- liftIO getCurrentTime
-        let record = ProfileRecord (ProfileRecordCustomer setCustomer')
-        insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
-        pure True
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> fmap UserExists $ liftDb $ do
+      now <- liftIO getCurrentTime
+      let record = ProfileRecord (ProfileRecordCustomer setCustomer')
+      insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
+      pure JSONUnit
 
 
 -- | Physically store the diets dictated by the Diets data-view
-setDiets :: AuthToken -> Diets -> SystemM Bool
+setDiets :: AuthToken -> Diets -> SystemM (UserExists (CustomerUnique JSONUnit))
 setDiets authToken (Diets ds) = do
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      liftDb $ do
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> fmap UserExists $ liftDb $ do
+      mCust <- do
         mCustEnt <- getBy (UniqueCustomer userId)
-        mCust <- case mCustEnt of
+        case mCustEnt of
           Nothing -> pure Nothing
           Just (Entity custId _) -> pure (Just custId)
-        case mCust of
-          Nothing -> pure False
-          Just custId -> do
-            assignDiets custId ds
-            pure True
+      case mCust of
+        Nothing -> pure CustomerNotUnique
+        Just custId -> fmap CustomerUnique $ do
+          assignDiets custId ds
+          pure JOSNUnit
 
 
 -- | Witness the Diets data-view associated with a customer
-getDiets :: AuthToken -> SystemM (Maybe Diets)
+getDiets :: AuthToken
+         -> SystemM
+            ( UserExists
+              ( CustomerUnique
+                ( Maybe Diets)))
 getDiets authToken = do
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure Nothing
-    Just userId -> do
-      liftDb $ do
-        mCustEnt <- getBy (UniqueCustomer userId)
-        case mCustEnt of
-          Nothing -> pure Nothing
-          Just (Entity custId _) -> do
-            mDiets <- getCustDiets custId
-            case mDiets of
-              Nothing -> pure Nothing
-              Just diets -> pure $ Just $ Diets diets
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> fmap UserExists $ liftDb $ do
+      mCustEnt <- getBy (UniqueCustomer userId)
+      case mCustEnt of
+        Nothing -> pure CustomerNotUnique
+        Just (Entity custId _) -> fmap CustomerUnique $ do
+          mDiets <- getCustDiets custId
+          case mDiets of
+            Nothing -> pure Nothing
+            Just diets -> pure $ Just $ Diets diets
 
 
 -- | Physically store the allergies dictated by the Allergies data-view
-setAllergies :: AuthToken -> Allergies -> SystemM Bool
+setAllergies :: AuthToken -> Allergies -> SystemM (UserExists (CustomerUnique JSONUnit))
 setAllergies authToken (Allergies as) = do
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      liftDb $ do
-        mCustEnt <- getBy (UniqueCustomer userId)
-        mCust <- case mCustEnt of
-          Nothing -> pure Nothing
-          Just (Entity custId _) -> pure (Just custId)
-        case mCust of
-          Nothing -> pure False
-          Just custId -> do
-            assignAllergies custId as
-            pure True
-
-
--- | Witness the Allergies data-view associated with a customer
-getAllergies :: AuthToken -> SystemM (Maybe Allergies)
-getAllergies authToken = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure Nothing
-    Just userId -> do
-      liftDb $ do
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> fmap UserExists $ liftDb $ do
+      mCust <- do
         mCustEnt <- getBy (UniqueCustomer userId)
         case mCustEnt of
           Nothing -> pure Nothing
-          Just (Entity custId _) -> do
-            mAllergies <- getCustAllergies custId
-            case mAllergies of
-              Nothing -> pure Nothing
-              Just allergies -> pure $ Just $ Allergies allergies
+          Just (Entity custId _) -> pure (Just custId)
+      case mCust of
+        Nothing -> pure CustomerNotUnique
+        Just custId -> do
+          assignAllergies custId as
+          pure (CustomerUnique JSONUnit)
+
+
+-- | Witness the Allergies data-view associated with a customer
+getAllergies :: AuthToken
+             -> SystemM
+                ( UserExists
+                  ( CustomerUnique
+                    ( Maybe Allergies)))
+getAllergies authToken = do
+  mUserId <- getUserId authToken
+  case mUserId of
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> fmap UserExists $ liftDb $ do
+      mCustEnt <- getBy (UniqueCustomer userId)
+      case mCustEnt of
+        Nothing -> pure CustomerDoesntExist
+        Just (Entity custId _) -> fmap CustomerExists $ do
+          mAllergies <- getCustAllergies custId
+          case mAllergies of
+            Nothing -> pure Nothing
+            Just allergies -> pure $ Just $ Allergies allergies
 
 
 
 -- | Physically store a customer's review
-submitReview :: AuthToken -> SubmitReview -> SystemM (Maybe StoredReviewId)
+submitReview :: AuthToken
+             -> SubmitReview
+             -> SystemM
+                ( UserExists
+                  ( HasRole
+                    ( CustomerUnique
+                      ( OrderExists StoredReviewId))))
 submitReview authToken (SubmitReview orderId rating heading body images) = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure Nothing
-    Just userId -> do
-      liftDb $ do
-        ok <- hasRole userId UserRole.Customer
-        if not ok
-          then pure Nothing
-          else do
-            mCust <- getBy (UniqueCustomer userId)
-            case mCust of
-              Nothing -> pure Nothing
-              Just (Entity custId _) -> do
-                mOrder <- get orderId
-                case mOrder of
-                  Nothing -> pure Nothing
-                  Just (StoredOrder custId' mealId _ chefId _ _ _)
-                    | custId /= custId' -> pure Nothing
-                    | otherwise -> do
-                        now <- liftIO getCurrentTime
-                        reviewId <- insert $ StoredReview
-                          orderId
-                          chefId
-                          mealId
-                          custId
-                          rating
-                          now
-                          heading
-                          body
-                          images
-                        pure (Just reviewId)
+  verifyRole Customer authToken $ \userId -> liftDb $ do
+    mCust <- getBy (UniqueCustomer userId)
+    case mCust of
+      Nothing -> pure CustomerNotUnique
+      Just (Entity custId _) -> fmap CustomerUnique $ do
+        mOrder <- get orderId
+        case mOrder of
+          Nothing -> pure OrderDoesntExist
+          Just (StoredOrder custId' mealId _ chefId _ _ _)
+            | custId /= custId' -> pure OrderDoesntExist
+            | otherwise -> fmap OrderExists $ do
+                now <- liftIO getCurrentTime
+                reviewId <- insert $ StoredReview
+                  orderId
+                  chefId
+                  mealId
+                  custId
+                  rating
+                  now
+                  heading
+                  body
+                  images
+                pure reviewId
 
 
 
 -- | Witness a customer's review
-getReview :: StoredReviewId -> ReaderT SqlBackend IO (Maybe Review)
+getReview :: StoredReviewId -> ReaderT SqlBackend IO (ReviewExists Review)
 getReview reviewId = do
   mReview <- get reviewId
   case mReview of
-    Nothing -> pure Nothing
+    Nothing -> pure ReviewDoesntExist
     Just (StoredReview _ _ _ _ rating submitted heading body images) ->
-      pure $ Just Review
+      pure $ ReviewExists Review
         { reviewRating = rating
         , reviewSubmitted = submitted
         , reviewHeading = heading
@@ -277,19 +282,22 @@ getReview reviewId = do
 
 
 -- | Witness a MealSynopsis data-view
-getMealSynopsis :: StoredMealId -> SystemM (Maybe MealSynopsis)
+getMealSynopsis :: StoredMealId
+                -> SystemM
+                   ( MealExists
+                     ( MealSynopsis)
 getMealSynopsis mealId = do
   SystemEnv{systemEnvReviews} <- getSystemEnv
 
   mCont <- liftDb $ do
     mMeal <- get mealId
     case mMeal of
-      Nothing -> pure Nothing
+      Nothing -> pure MealDoesntExist
       Just (StoredMeal title permalink _ heading _ _ images price) -> do
         mTags <- getMealTags mealId
         case mTags of
-          Nothing -> pure Nothing
-          Just tags -> do
+          MealDoesntExist -> pure MealDoesntExist
+          MealExists tags -> fmap MealExists $ do
             mIngDiets <- getMealIngredientsDiets mealId
             case mIngDiets of
               Nothing -> pure Nothing

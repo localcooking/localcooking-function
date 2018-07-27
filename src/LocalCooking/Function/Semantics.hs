@@ -1,10 +1,13 @@
 {-# LANGUAGE
     NamedFieldPuns
   , ScopedTypeVariables
+  , GADTs
   #-}
 
 module LocalCooking.Function.Semantics where
 
+import LocalCooking.Semantics.Tag (TagExists (..))
+import LocalCooking.Semantics.Mitch (MealExists (..))
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.Tag.Ingredient (IngredientTag)
@@ -37,19 +40,22 @@ import qualified Data.Set as Set
 import Data.Maybe (catMaybes)
 import Control.Monad (forM, forM_)
 import Control.Monad.Reader (ReaderT)
-import Database.Persist (Entity (..), (==.))
+import Database.Persist
+  (Entity (..), (==.), Key (..), PersistEntityBackend (..), BaseBackend (..))
 import Database.Persist.Sql (SqlBackend)
 import Database.Persist.Class (selectList, get, getBy, insert_, deleteBy)
 
 
 
 -- | Returns the set of non-violated diets, and used ingredients per diet
-getMealIngredientsDiets :: StoredMealId -> ReaderT SqlBackend IO (Maybe ([IngredientTag],[DietTag]))
+getMealIngredientsDiets :: StoredMealId
+                        -> ReaderT SqlBackend IO
+                           ( MealExists ([IngredientTag],[DietTag]))
 getMealIngredientsDiets mealId = do
   mMeal <- get mealId
   case mMeal of
-    Nothing -> pure Nothing
-    Just _ -> do
+    Nothing -> pure MealDoesntExist
+    Just _ -> fmap MealExists $ do
       xs <- selectList [MealIngredientMeal ==. mealId] []
       ( ings
         , ds :: [Set.Set DietTag]
@@ -62,50 +68,80 @@ getMealIngredientsDiets mealId = do
             pure $ Just (ing, Set.fromList diets)
       let violated = Set.unions ds
       allDiets <- Set.fromList <$> getDiets
-      pure $ Just (ings, Set.toList (allDiets `Set.difference` violated))
+      pure $ (ings, Set.toList (allDiets `Set.difference` violated))
 
 
-
-getMealTags :: StoredMealId -> ReaderT SqlBackend IO (Maybe [MealTag])
-getMealTags mealId = do
+getTags :: PersistEntityBackend storedTag ~ PersistEntityBackend storedN
+        => PersistEntityBackend storedTag ~ SqlBackend
+        => PersistEntity storedTag
+        => PersistEntity storedN
+        => EntityField storedN StoredMealId
+        -> (storedN -> Key storedTag)
+        -> (storedTag -> a)
+        -> StoredMealId
+        -> ReaderT SqlBackend IO
+           (MealExists [TagExists a])
+getTags field getTagId getStoredTag mealId = do
   mEnt <- get mealId
   case mEnt of
-    Nothing -> pure Nothing
-    Just _ -> do
-      xs <- selectList [MealTagRelationMeal ==. mealId] []
-      fmap (Just . catMaybes) $ forM xs $ \(Entity _ (MealTagRelation _ tagId)) -> do
-        mStoredTag <- get tagId
+    Nothing -> pure MealDoesntExist
+    Just _ -> fmap MealExists $ do
+      xs <- selectList [field ==. mealId] []
+      forM xs $ \(Entity _ x) -> do
+        mStoredTag <- get (getTagId x)
         case mStoredTag of
-          Nothing -> pure Nothing
-          Just (StoredMealTag t) -> pure (Just t)
+          Nothing -> pure TagDoesntExist
+          Just x -> pure (TagExists (getStoredTag x))
 
 
-getMenuTags :: StoredMenuId -> ReaderT SqlBackend IO (Maybe [MealTag])
-getMenuTags menuId = do
-  mEnt <- get menuId
-  case mEnt of
-    Nothing -> pure Nothing
-    Just _ -> do
-      xs <- selectList [MenuTagRelationMenu ==. menuId] []
-      fmap (Just . catMaybes) $ forM xs $ \(Entity _ (MenuTagRelation _ tagId)) -> do
-        mStoredTag <- get tagId
-        case mStoredTag of
-          Nothing -> pure Nothing
-          Just (StoredMealTag t) -> pure (Just t)
+getMealTags :: StoredMealId
+            -> ReaderT SqlBackend IO
+               (MealExists [TagExists MealTag])
+getMealTags =
+  getTags
+    MealTagRelationMeal
+    (\(MealTagRelation _ tagId) -> tagId)
+    (\(StoredMealTag x) -> x)
+-- getMealTags mealId = do
+--   mEnt <- get mealId
+--   case mEnt of
+--     Nothing -> pure MealDoesntExist
+--     Just _ -> fmap MealExists $ do
+--       xs <- selectList [MealTagRelationMeal ==. mealId] []
+--       forM xs $ \(Entity _ (MealTagRelation _ tagId)) -> do
+--         mStoredTag <- get tagId
+--         case mStoredTag of
+--           Nothing -> pure TagDoesntExist
+--           Just (StoredMealTag t) -> pure (TagExists t)
 
 
-getChefTags :: StoredChefId -> ReaderT SqlBackend IO (Maybe [ChefTag])
-getChefTags chefId = do
-  mEnt <- get chefId
-  case mEnt of
-    Nothing -> pure Nothing
-    Just _ -> do
-      xs <- selectList [ChefTagRelationChef ==. chefId] []
-      fmap (Just . catMaybes) $ forM xs $ \(Entity _ (ChefTagRelation _ tagId)) -> do
-        mStoredTag <- get tagId
-        case mStoredTag of
-          Nothing -> pure Nothing
-          Just (StoredChefTag t) -> pure (Just t)
+-- getMenuTags :: StoredMenuId
+--             -> ReaderT SqlBackend IO (MealExists [TagExists MealTag])
+-- getMenuTags menuId = do
+--   mEnt <- get menuId
+--   case mEnt of
+--     Nothing -> pure MealDoesntExist
+--     Just _ -> fmap MealExists $ do
+--       xs <- selectList [MenuTagRelationMenu ==. menuId] []
+--       forM xs $ \(Entity _ (MenuTagRelation _ tagId)) -> do
+--         mStoredTag <- get tagId
+--         case mStoredTag of
+--           Nothing -> pure TagDoesntExist
+--           Just (StoredMealTag t) -> pure (TagExists t)
+
+
+-- getChefTags :: StoredChefId -> ReaderT SqlBackend IO (Maybe [ChefTag])
+-- getChefTags chefId = do
+--   mEnt <- get chefId
+--   case mEnt of
+--     Nothing -> pure Nothing
+--     Just _ -> do
+--       xs <- selectList [ChefTagRelationChef ==. chefId] []
+--       fmap (Just . catMaybes) $ forM xs $ \(Entity _ (ChefTagRelation _ tagId)) -> do
+--         mStoredTag <- get tagId
+--         case mStoredTag of
+--           Nothing -> pure Nothing
+--           Just (StoredChefTag t) -> pure (Just t)
 
 
 
