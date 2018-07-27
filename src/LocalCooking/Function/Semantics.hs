@@ -2,12 +2,13 @@
     NamedFieldPuns
   , ScopedTypeVariables
   , GADTs
+  , RankNTypes
   #-}
 
 module LocalCooking.Function.Semantics where
 
 import LocalCooking.Semantics.Tag (TagExists (..))
-import LocalCooking.Semantics.Mitch (MealExists (..))
+import LocalCooking.Semantics.Mitch (MealExists (..), MenuExists (..), ChefExists (..))
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.Tag.Ingredient (IngredientTag)
@@ -71,21 +72,25 @@ getMealIngredientsDiets mealId = do
       pure $ (ings, Set.toList (allDiets `Set.difference` violated))
 
 
-getTags :: PersistEntityBackend storedTag ~ PersistEntityBackend storedN
+getTags :: forall storedTag storedRelation storedContent errorType a
+         . PersistEntityBackend storedTag ~ PersistEntityBackend storedRelation
+        => PersistEntityBackend storedTag ~ PersistEntityBackend storedContent
         => PersistEntityBackend storedTag ~ SqlBackend
         => PersistEntity storedTag
-        => PersistEntity storedN
-        => EntityField storedN StoredMealId
-        -> (storedN -> Key storedTag)
+        => PersistEntity storedRelation
+        => PersistEntity storedContent
+        => EntityField storedRelation (Key storedContent)
+        -> (storedRelation -> Key storedTag)
         -> (storedTag -> a)
-        -> StoredMealId
-        -> ReaderT SqlBackend IO
-           (MealExists [TagExists a])
-getTags field getTagId getStoredTag mealId = do
+        -> (forall b. errorType b) -- ^ Fail
+        -> (forall b. b -> errorType b) -- ^ Success
+        -> Key storedContent
+        -> ReaderT SqlBackend IO (errorType [TagExists a])
+getTags field getTagId getStoredTag fail' success mealId = do
   mEnt <- get mealId
   case mEnt of
-    Nothing -> pure MealDoesntExist
-    Just _ -> fmap MealExists $ do
+    Nothing -> pure fail'
+    Just _ -> fmap success $ do
       xs <- selectList [field ==. mealId] []
       forM xs $ \(Entity _ x) -> do
         mStoredTag <- get (getTagId x)
@@ -102,46 +107,31 @@ getMealTags =
     MealTagRelationMeal
     (\(MealTagRelation _ tagId) -> tagId)
     (\(StoredMealTag x) -> x)
--- getMealTags mealId = do
---   mEnt <- get mealId
---   case mEnt of
---     Nothing -> pure MealDoesntExist
---     Just _ -> fmap MealExists $ do
---       xs <- selectList [MealTagRelationMeal ==. mealId] []
---       forM xs $ \(Entity _ (MealTagRelation _ tagId)) -> do
---         mStoredTag <- get tagId
---         case mStoredTag of
---           Nothing -> pure TagDoesntExist
---           Just (StoredMealTag t) -> pure (TagExists t)
+    MealDoesntExist
+    MealExists
 
+getMenuTags :: StoredMenuId
+            -> ReaderT SqlBackend IO
+               (MenuExists [TagExists MealTag])
+getMenuTags =
+  getTags
+    MenuTagRelationMenu
+    (\(MenuTagRelation _ tagId) -> tagId)
+    (\(StoredMealTag x) -> x)
+    MenuDoesntExist
+    MenuExists
 
--- getMenuTags :: StoredMenuId
---             -> ReaderT SqlBackend IO (MealExists [TagExists MealTag])
--- getMenuTags menuId = do
---   mEnt <- get menuId
---   case mEnt of
---     Nothing -> pure MealDoesntExist
---     Just _ -> fmap MealExists $ do
---       xs <- selectList [MenuTagRelationMenu ==. menuId] []
---       forM xs $ \(Entity _ (MenuTagRelation _ tagId)) -> do
---         mStoredTag <- get tagId
---         case mStoredTag of
---           Nothing -> pure TagDoesntExist
---           Just (StoredMealTag t) -> pure (TagExists t)
+getChefTags :: StoredChefId
+            -> ReaderT SqlBackend IO
+               (ChefExists [TagExists ChefTag])
+getChefTags =
+  getTags
+    ChefTagRelationChef
+    (\(ChefTagRelation _ tagId) -> tagId)
+    (\(StoredChefTag x) -> x)
+    ChefDoesntExist
+    ChefExists
 
-
--- getChefTags :: StoredChefId -> ReaderT SqlBackend IO (Maybe [ChefTag])
--- getChefTags chefId = do
---   mEnt <- get chefId
---   case mEnt of
---     Nothing -> pure Nothing
---     Just _ -> do
---       xs <- selectList [ChefTagRelationChef ==. chefId] []
---       fmap (Just . catMaybes) $ forM xs $ \(Entity _ (ChefTagRelation _ tagId)) -> do
---         mStoredTag <- get tagId
---         case mStoredTag of
---           Nothing -> pure Nothing
---           Just (StoredChefTag t) -> pure (Just t)
 
 
 

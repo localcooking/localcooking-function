@@ -285,7 +285,7 @@ getReview reviewId = do
 getMealSynopsis :: StoredMealId
                 -> SystemM
                    ( MealExists
-                     ( MealSynopsis)
+                     ( Maybe MealSynopsis))
 getMealSynopsis mealId = do
   SystemEnv{systemEnvReviews} <- getSystemEnv
 
@@ -297,19 +297,19 @@ getMealSynopsis mealId = do
         mTags <- getMealTags mealId
         case mTags of
           MealDoesntExist -> pure MealDoesntExist
-          MealExists tags -> fmap MealExists $ do
+          MealExists tags -> do
             mIngDiets <- getMealIngredientsDiets mealId
             case mIngDiets of
-              Nothing -> pure Nothing
-              Just (_,diets) -> do
+              MealDoesntExist -> pure MealDoesntExist
+              MealExists (_,diets) -> fmap MealExists $ do
                 orders <- count
                   [ StoredOrderMeal ==. mealId
                   , StoredOrderProgress !=. DeliveredProgress
                   ]
-                pure $ Just (title,permalink,heading,images,price,diets,orders,tags)
+                pure (title,permalink,heading,images,price,diets,orders,tags)
   case mCont of
-    Nothing -> pure Nothing
-    Just (title,permalink,heading,images,price,diets,orders,tags) -> do
+    MealDoesntExist -> pure MealDoesntExist
+    MealExists (title,permalink,heading,images,price,diets,orders,tags) -> fmap MealExists $ do
       mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
       case mRating of
         Nothing -> pure Nothing
@@ -328,15 +328,18 @@ getMealSynopsis mealId = do
 
 
 -- | Witness a ChefSynopsis data-view
-getChefSynopsis :: StoredChefId -> SystemM (Maybe ChefSynopsis)
+getChefSynopsis :: StoredChefId
+                -> SystemM
+                   ( ChefExists
+                     ( Maybe ChefSynopsis)
 getChefSynopsis chefId = do
   SystemEnv{systemEnvReviews} <- getSystemEnv
 
   mStoredChef <- liftDb $ do
     mChef <- get chefId
     case mChef of
-      Nothing -> pure Nothing
-      Just (StoredChef _ name permalink _ _ avatar) -> do
+      Nothing -> pure ChefDoesntExist
+      Just (StoredChef _ name permalink _ _ avatar) -> fmap ChefExists $ do
         mTags <- getChefTags chefId
         case mTags of
           Nothing -> pure Nothing
