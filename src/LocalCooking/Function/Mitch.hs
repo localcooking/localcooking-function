@@ -565,7 +565,7 @@ browseMeal chefPermalink deadline mealPermalink = do
                               , mealImages = images
                               , mealIngredients = ings'
                               , mealDiets = diets
-                              , mealTags = tags
+                              , mealTags = catMaybes $ tagExistsToMaybe <$> tags
                               , mealOrders = orders
                               , mealRating = rating
                               , mealReviews = getReviewSynopsis <$> reviews
@@ -589,53 +589,63 @@ getCart authToken = do
 
 
 -- | Add a meal to a customer's cart
-addToCart :: AuthToken -> Permalink -> Day -> Permalink -> Int -> SystemM Bool
+addToCart :: AuthToken
+          -> Permalink
+          -> Day
+          -> Permalink
+          -> Int
+          -> SystemM
+             ( UserExists
+               ( MealExists JSONUnit))
 addToCart authToken chefPermalink deadline mealPermalink vol = do
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure False
-    Just userId -> do
-      liftDb $ do
-        mMealId <- getMealId chefPermalink deadline mealPermalink
-        case mMealId of
-          Nothing -> pure False
-          Just mealId -> do
-            now <- liftIO getCurrentTime
-            mEntry <- getBy (UniqueCartRelation userId mealId)
-            case mEntry of
-              Nothing ->
-                insert_ (CartRelation userId mealId vol now)
-              Just (Entity cartId (CartRelation _ _ oldVol _)) ->
-                update cartId
-                  [ CartRelationVolume =. (vol + oldVol)
-                  , CartRelationAdded =. now
-                  ]
-            pure True
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> fmap UserExists $ liftDb $ do
+      mMealId <- getMealId chefPermalink deadline mealPermalink
+      case mMealId of
+        Nothing -> pure MealDoesntExist
+        Just mealId -> fmap MealExists $ do
+          now <- liftIO getCurrentTime
+          mEntry <- getBy (UniqueCartRelation userId mealId)
+          case mEntry of
+            Nothing ->
+              insert_ (CartRelation userId mealId vol now)
+            Just (Entity cartId (CartRelation _ _ oldVol _)) ->
+              update cartId
+                [ CartRelationVolume =. (vol + oldVol)
+                , CartRelationAdded =. now
+                ]
+          pure JSONUnit
 
 -- checkout :: ?
 
 -- | Witness all Order data-views belonging to a login-session's customer
-getOrders :: AuthToken -> SystemM (Maybe [Order])
+getOrders :: AuthToken
+          -> SystemM
+             ( UserExists
+               ( CustomerUnique [MealExists (RatingExists Order)]))
 getOrders authToken = do
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure Nothing
-    Just userId -> do
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> fmap UserExists $ do
       mXs <- liftDb $ do
         mCust <- getBy (UniqueCustomer userId)
         case mCust of
-          Nothing -> pure Nothing
+          Nothing -> pure CustomerNotUnique
           Just (Entity custId _) ->
-            Just <$> selectList [StoredOrderCustomer ==. custId] []
+            CustomerUnique <$> selectList [StoredOrderCustomer ==. custId] []
       case mXs of
-        Nothing -> pure Nothing
-        Just xs -> fmap (Just . catMaybes) $
+        CustomerNotUnique -> pure CustomerNotUnique
+        CustomerUnique xs -> fmap CustomerUnique $
           forM xs $ \(Entity _ (StoredOrder _ mealId _ _ vol progress time)) -> do
             mMealSynopsis <- getMealSynopsis mealId
             case mMealSynopsis of
-              Nothing -> pure Nothing
-              Just meal ->
-                pure $ Just Order
+              MealDoesntExist -> pure MealDoesntExist
+              MealExists RatingDoesntExist -> pure (MealExists RatingDoesntExist)
+              MealExists (RatingExists meal) ->
+                pure $ MealExists $ RatingExists Order
                   { orderMeal = meal
                   , orderProgress = progress
                   , orderTime = time
