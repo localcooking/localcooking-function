@@ -24,8 +24,15 @@ import LocalCooking.Semantics.Mitch
   , MealSynopsis (..), Meal (..)
   , Order (..), CartEntry (..)
   , getReviewSynopsis
-  , CustomerExists (..)
+  , CustomerExists (..), ReviewExists (..), OrderExists (..), MealExists (..)
+  , MenuExists (..), ChefExists (..), ChefUnique (..), CustomerUnique (..)
+  , MealUnique (..), MenuUnique (..), MenuPublished (..), RatingExists (..)
+  , menuExistsToMaybe, mealExistsToMaybe, ratingExistsToMaybe, reviewExistsToMaybe
   )
+import LocalCooking.Semantics.User
+  ( UserExists (..), HasRole (..))
+import LocalCooking.Semantics.Tag
+  ( tagExistsToMaybe)
 import LocalCooking.Semantics.ContentRecord
   ( ContentRecord (ProfileRecord), ProfileRecord (ProfileRecordCustomer)
   , contentRecordVariant
@@ -35,10 +42,10 @@ import LocalCooking.Function.Semantics
   , assignAllergies, assignDiets, getCustDiets, getCustAllergies)
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getSystemEnv, liftDb)
 import LocalCooking.Function.System.Review (lookupChefReviews, lookupMealRating)
-import LocalCooking.Function.User (getUserId)
+import LocalCooking.Function.User (getUserId, verifyRole)
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.Order (OrderProgress (DeliveredProgress))
-import qualified LocalCooking.Common.User.Role as UserRole
+import LocalCooking.Common.User.Role (UserRole (Customer))
 import LocalCooking.Database.Schema
   ( getIngredientByName, getMealId, hasRole
   , StoredCustomer (..)
@@ -72,7 +79,8 @@ import Data.Text.Permalink (Permalink)
 import Data.IORef (newIORef, readIORef, modifyIORef)
 import Data.Time (getCurrentTime, utctDay)
 import Data.Time.Calendar (Day)
-import Control.Monad (forM, forM_)
+import Data.Aeson.JSONUnit (JSONUnit (..))
+import Control.Monad (forM, forM_, (<=<))
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Database.Persist (Entity (..), (==.), (=.), (>=.), (!=.))
@@ -164,7 +172,7 @@ setDiets authToken (Diets ds) = do
         Nothing -> pure CustomerNotUnique
         Just custId -> fmap CustomerUnique $ do
           assignDiets custId ds
-          pure JOSNUnit
+          pure JSONUnit
 
 
 -- | Witness the Diets data-view associated with a customer
@@ -172,7 +180,7 @@ getDiets :: AuthToken
          -> SystemM
             ( UserExists
               ( CustomerUnique
-                ( Maybe Diets)))
+                ( CustomerExists Diets)))
 getDiets authToken = do
   mUserId <- getUserId authToken
   case mUserId of
@@ -184,8 +192,8 @@ getDiets authToken = do
         Just (Entity custId _) -> fmap CustomerUnique $ do
           mDiets <- getCustDiets custId
           case mDiets of
-            Nothing -> pure Nothing
-            Just diets -> pure $ Just $ Diets diets
+            CustomerDoesntExist -> pure CustomerDoesntExist
+            CustomerExists diets -> pure $ CustomerExists $ Diets diets
 
 
 -- | Physically store the allergies dictated by the Allergies data-view
@@ -212,7 +220,7 @@ getAllergies :: AuthToken
              -> SystemM
                 ( UserExists
                   ( CustomerUnique
-                    ( Maybe Allergies)))
+                    ( CustomerExists Allergies)))
 getAllergies authToken = do
   mUserId <- getUserId authToken
   case mUserId of
@@ -220,12 +228,12 @@ getAllergies authToken = do
     UserExists userId -> fmap UserExists $ liftDb $ do
       mCustEnt <- getBy (UniqueCustomer userId)
       case mCustEnt of
-        Nothing -> pure CustomerDoesntExist
-        Just (Entity custId _) -> fmap CustomerExists $ do
+        Nothing -> pure CustomerNotUnique
+        Just (Entity custId _) -> fmap CustomerUnique $ do
           mAllergies <- getCustAllergies custId
           case mAllergies of
-            Nothing -> pure Nothing
-            Just allergies -> pure $ Just $ Allergies allergies
+            CustomerDoesntExist -> pure CustomerDoesntExist
+            CustomerExists allergies -> pure $ CustomerExists $ Allergies allergies
 
 
 
@@ -237,7 +245,7 @@ submitReview :: AuthToken
                   ( HasRole
                     ( CustomerUnique
                       ( OrderExists StoredReviewId))))
-submitReview authToken (SubmitReview orderId rating heading body images) = do
+submitReview authToken (SubmitReview orderId rating heading body images) =
   verifyRole Customer authToken $ \userId -> liftDb $ do
     mCust <- getBy (UniqueCustomer userId)
     case mCust of
@@ -285,7 +293,7 @@ getReview reviewId = do
 getMealSynopsis :: StoredMealId
                 -> SystemM
                    ( MealExists
-                     ( Maybe MealSynopsis))
+                     ( RatingExists MealSynopsis))
 getMealSynopsis mealId = do
   SystemEnv{systemEnvReviews} <- getSystemEnv
 
@@ -312,16 +320,16 @@ getMealSynopsis mealId = do
     MealExists (title,permalink,heading,images,price,diets,orders,tags) -> fmap MealExists $ do
       mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
       case mRating of
-        Nothing -> pure Nothing
+        Nothing -> pure RatingDoesntExist
         Just rating ->
-          pure $ Just MealSynopsis
+          pure $ RatingExists MealSynopsis
             { mealSynopsisTitle = title
             , mealSynopsisPermalink = permalink
             , mealSynopsisHeading = heading
             , mealSynopsisImages = images
             , mealSynopsisRating = rating
             , mealSynopsisOrders = orders
-            , mealSynopsisTags = tags
+            , mealSynopsisTags = catMaybes $ tagExistsToMaybe <$> tags
             , mealSynopsisDiets = diets
             , mealSynopsisPrice = price
             }
@@ -331,7 +339,7 @@ getMealSynopsis mealId = do
 getChefSynopsis :: StoredChefId
                 -> SystemM
                    ( ChefExists
-                     ( Maybe ChefSynopsis)
+                     ( ReviewExists ChefSynopsis))
 getChefSynopsis chefId = do
   SystemEnv{systemEnvReviews} <- getSystemEnv
 
@@ -339,83 +347,89 @@ getChefSynopsis chefId = do
     mChef <- get chefId
     case mChef of
       Nothing -> pure ChefDoesntExist
-      Just (StoredChef _ name permalink _ _ avatar) -> fmap ChefExists $ do
+      Just (StoredChef _ name permalink _ _ avatar) -> do
         mTags <- getChefTags chefId
         case mTags of
-          Nothing -> pure Nothing
-          Just tags -> do
+          ChefDoesntExist -> pure ChefDoesntExist
+          ChefExists tags -> fmap ChefExists $ do
             orders <- count [StoredOrderChef ==. chefId]
-            pure $ Just (name,permalink,avatar,tags,orders)
+            pure (name,permalink,avatar,tags,orders)
   case mStoredChef of
-    Nothing -> pure Nothing
-    Just (name,permalink,avatar,tags,orders) -> do
+    ChefDoesntExist -> pure ChefDoesntExist
+    ChefExists (name,permalink,avatar,tags,orders) -> fmap ChefExists $ do
       mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
       case mReviews of
-        Nothing -> pure Nothing
+        Nothing -> pure ReviewDoesntExist
         Just (rating,_) ->
-          pure $ Just ChefSynopsis
+          pure $ ReviewExists ChefSynopsis
             { chefSynopsisName = name
             , chefSynopsisPermalink = permalink
             , chefSynopsisImage = avatar
             , chefSynopsisRating = rating
             , chefSynopsisOrders = orders
-            , chefSynopsisTags = tags
+            , chefSynopsisTags = catMaybes $ tagExistsToMaybe <$> tags
             }
 
 
 -- | Witness all MenuSynopsis data-views belonging to a chef
-getChefMenuSynopses :: StoredChefId -> ReaderT SqlBackend IO (Maybe [MenuSynopsis])
+getChefMenuSynopses :: StoredChefId
+                    -> ReaderT SqlBackend IO
+                       (ChefExists [MenuExists MenuSynopsis])
 getChefMenuSynopses chefId = do
   mChef <- get chefId
   case mChef of
-    Nothing -> pure Nothing
-    Just _ -> do
+    Nothing -> pure ChefDoesntExist
+    Just _ -> fmap ChefExists $ do
       xs <- selectList [StoredMenuAuthor ==. chefId] []
-      fmap (Just . catMaybes) $ forM xs $ \(Entity menuId (StoredMenu published deadline heading _ images _)) ->
+      fmap catMaybes $ forM xs $ \(Entity menuId (StoredMenu published deadline heading _ images _)) ->
         case published of
           Nothing -> pure Nothing
-          Just p -> do
+          Just p -> fmap Just $ do
             mTags <- getMenuTags menuId
             case mTags of
-              Nothing -> pure Nothing
-              Just tags ->
-                pure $ Just MenuSynopsis
+              MenuDoesntExist -> pure MenuDoesntExist
+              MenuExists tags ->
+                pure $ MenuExists MenuSynopsis
                   { menuSynopsisPublished = p
                   , menuSynopsisDeadline = deadline
                   , menuSynopsisHeading = heading
-                  , menuSynopsisTags = tags
+                  , menuSynopsisTags = catMaybes $ tagExistsToMaybe <$> tags
                   , menuSynopsisImages = images
                   }
 
 
 -- | Witness all MealSynopsis data-views belonging to a Menu
-getMenuMealSynopses :: StoredMenuId -> SystemM (Maybe [MealSynopsis])
+getMenuMealSynopses :: StoredMenuId
+                    -> SystemM (MenuExists [MealExists (RatingExists MealSynopsis)])
 getMenuMealSynopses menuId = do
   mXs <- liftDb $ do
     mMenu <- get menuId
     case mMenu of
-      Nothing -> pure Nothing
-      Just _ -> Just <$> selectList [StoredMealMenu ==. menuId] []
+      Nothing -> pure MenuDoesntExist
+      Just _ -> MenuExists <$> selectList [StoredMealMenu ==. menuId] []
   case mXs of
-    Nothing -> pure Nothing
-    Just xs -> fmap (Just . catMaybes) $ forM xs $ \(Entity mealId _) ->
-                  getMealSynopsis mealId
+    MenuDoesntExist -> pure MenuDoesntExist
+    MenuExists xs -> fmap MenuExists $ forM xs $ \(Entity mealId _) ->
+      getMealSynopsis mealId
 
 
 -- | Witness a Chef data-view
-browseChef :: Permalink -> SystemM (Maybe Chef)
+browseChef :: Permalink
+           -> SystemM
+              ( ChefUnique
+                ( ChefExists (Maybe Chef)))
 browseChef chefPermalink = do
   SystemEnv{systemEnvReviews} <- getSystemEnv
 
   liftDb $ do
     mChefEnt <- getBy (UniqueChefPermalink chefPermalink)
     case mChefEnt of
-      Nothing -> pure Nothing
-      Just (Entity chefId (StoredChef _ name permalink bio images _)) -> do
+      Nothing -> pure ChefNotUnique
+      Just (Entity chefId (StoredChef _ name permalink bio images _)) -> fmap ChefUnique $ do
         mTags <- getChefTags chefId
         case mTags of
-          Nothing -> pure Nothing
-          Just tags -> do
+          ChefDoesntExist -> pure ChefDoesntExist
+          ChefExists tags -> do
             totalOrders <- count [StoredOrderChef ==. chefId]
             today <- utctDay <$> liftIO getCurrentTime
             activeOrders <- do
@@ -427,8 +441,8 @@ browseChef chefPermalink = do
               liftIO (readIORef countRef)
             mMeals <- getChefMenuSynopses chefId
             case mMeals of
-              Nothing -> pure Nothing
-              Just meals -> do
+              ChefDoesntExist -> pure ChefDoesntExist
+              ChefExists meals -> fmap ChefExists $ do
                 mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
                 case mReviews of
                   Nothing -> pure Nothing
@@ -442,73 +456,92 @@ browseChef chefPermalink = do
                       , chefReviews = getReviewSynopsis <$> reviews
                       , chefActiveOrders = activeOrders
                       , chefTotalOrders = totalOrders
-                      , chefTags = tags
-                      , chefMenus = meals
+                      , chefTags = catMaybes $ tagExistsToMaybe <$> tags
+                      , chefMenus = catMaybes $ menuExistsToMaybe <$> meals
                       }
 
 
 -- | Witness a Menu data-view
-browseMenu :: Permalink -> Day -> SystemM (Maybe Menu)
+browseMenu :: Permalink
+           -> Day
+           -> SystemM
+              ( ChefUnique
+                ( MenuUnique
+                  ( MenuPublished
+                    ( ChefExists
+                      ( ReviewExists
+                        ( MenuExists Menu))))))
 browseMenu chefPermalink deadline = do
   mMenuDeets <- liftDb $ do
     mChef <- getBy (UniqueChefPermalink chefPermalink)
     case mChef of
-      Nothing -> pure Nothing
-      Just (Entity chefId _) -> do
+      Nothing -> pure ChefNotUnique
+      Just (Entity chefId _) -> fmap ChefUnique $ do
         mMenu <- getBy (UniqueMenuDeadline chefId deadline)
         case mMenu of
-          Nothing -> pure Nothing
-          Just (Entity menuId (StoredMenu mPub _ _ desc _ _)) ->
+          Nothing -> pure MenuNotUnique
+          Just (Entity menuId (StoredMenu mPub _ _ desc _ _)) -> fmap MenuUnique $
             case mPub of
-              Nothing -> pure Nothing
-              Just published -> pure $ Just (menuId,published,desc,chefId)
+              Nothing -> pure MenuNotPublished
+              Just published -> pure $ MenuPublished (menuId,published,desc,chefId)
 
   case mMenuDeets of
-    Nothing -> pure Nothing
-    Just (menuId,published,desc,chefId) -> do
+    ChefNotUnique -> pure ChefNotUnique
+    ChefUnique MenuNotUnique -> pure (ChefUnique MenuNotUnique)
+    ChefUnique (MenuUnique MenuNotPublished) -> pure $ ChefUnique $ MenuUnique MenuNotPublished
+    ChefUnique (MenuUnique (MenuPublished (menuId,published,desc,chefId))) -> fmap (ChefUnique . MenuUnique . MenuPublished) $ do
       mChef <- getChefSynopsis chefId
       case mChef of
-        Nothing -> pure Nothing
-        Just chef -> do
+        ChefDoesntExist -> pure ChefDoesntExist
+        ChefExists ReviewDoesntExist -> pure (ChefExists ReviewDoesntExist)
+        ChefExists (ReviewExists chef) -> fmap (ChefExists . ReviewExists) $ do
           mMeals <- getMenuMealSynopses menuId
           case mMeals of
-            Nothing -> pure Nothing
-            Just meals ->
-              pure $ Just Menu
+            MenuDoesntExist -> pure MenuDoesntExist
+            MenuExists meals ->
+              pure $ MenuExists Menu
                 { menuPublished = published
                 , menuDeadline = deadline
                 , menuDescription = desc
                 , menuAuthor = chef
-                , menuMeals = meals
+                , menuMeals = catMaybes $ (ratingExistsToMaybe <=< mealExistsToMaybe) <$> meals
                 }
 
 
 -- | Witness a Meal data-view
-browseMeal :: Permalink -> Day -> Permalink -> SystemM (Maybe Meal)
+browseMeal :: Permalink
+           -> Day
+           -> Permalink
+           -> SystemM
+              ( ChefUnique
+                ( MenuUnique
+                  ( MealUnique
+                    ( MealExists
+                      ( RatingExists Meal)))))
 browseMeal chefPermalink deadline mealPermalink = do
   SystemEnv{systemEnvReviews} <- getSystemEnv
 
   liftDb $ do
     mChef <- getBy (UniqueChefPermalink chefPermalink)
     case mChef of
-      Nothing -> pure Nothing
-      Just (Entity chefId _) -> do
+      Nothing -> pure ChefNotUnique
+      Just (Entity chefId _) -> fmap ChefUnique $ do
         mMenu <- getBy (UniqueMenuDeadline chefId deadline)
         case mMenu of
-          Nothing -> pure Nothing
-          Just (Entity menuId _) -> do
+          Nothing -> pure MenuNotUnique
+          Just (Entity menuId _) -> fmap MenuUnique $ do
             mMeal <- getBy (UniqueMealPermalink menuId mealPermalink)
             case mMeal of
-              Nothing -> pure Nothing
-              Just (Entity mealId (StoredMeal title permalink _ _ desc inst images price)) -> do
+              Nothing -> pure MealNotUnique
+              Just (Entity mealId (StoredMeal title permalink _ _ desc inst images price)) -> fmap MealUnique $ do
                 mIngDiets <- getMealIngredientsDiets mealId
                 case mIngDiets of
-                  Nothing -> pure Nothing
-                  Just (ings,diets) -> do
+                  MealDoesntExist -> pure MealDoesntExist
+                  MealExists (ings,diets) -> do
                     mTags <- getMealTags mealId
                     case mTags of
-                      Nothing -> pure Nothing
-                      Just tags -> do
+                      MealDoesntExist -> pure MealDoesntExist
+                      MealExists tags -> fmap MealExists $ do
                         orders <- count
                           [ StoredOrderMeal ==. mealId
                           , StoredOrderProgress !=. DeliveredProgress
@@ -518,11 +551,13 @@ browseMeal chefPermalink deadline mealPermalink = do
                             selectList [StoredReviewMeal ==. mealId] []
                         mRating <- liftIO (lookupMealRating systemEnvReviews mealId)
                         case mRating of
-                          Nothing -> pure Nothing
+                          Nothing -> pure RatingDoesntExist
                           Just rating -> do
-                            reviews <- fmap catMaybes $ forM reviewIds getReview
+                            reviews <- do
+                              xs <- forM reviewIds getReview
+                              pure $ catMaybes $ reviewExistsToMaybe <$> xs
                             ings' <- fmap catMaybes $ forM ings getIngredientByName
-                            pure $ Just Meal
+                            pure $ RatingExists Meal
                               { mealTitle = title
                               , mealPermalink = permalink
                               , mealDescription = desc
@@ -539,15 +574,18 @@ browseMeal chefPermalink deadline mealPermalink = do
 
 
 -- | Witness all CartEntry data-views belonging to a login session's customer
-getCart :: AuthToken -> SystemM (Maybe [CartEntry])
+getCart :: AuthToken
+        -> SystemM
+           ( UserExists [CartEntry])
 getCart authToken = do
   mUserId <- getUserId authToken
   case mUserId of
-    Nothing -> pure Nothing
-    Just userId -> do
-      liftDb $
-        fmap (Just . fmap (\(Entity _ (CartRelation _ mealId vol time)) -> CartEntry mealId vol time))
-          $ selectList [CartRelationCustomer ==. userId] []
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists userId -> liftDb $
+      fmap
+        (UserExists . fmap (\(Entity _ (CartRelation _ mealId vol time)) ->
+          CartEntry mealId vol time))
+        $ selectList [CartRelationCustomer ==. userId] []
 
 
 -- | Add a meal to a customer's cart

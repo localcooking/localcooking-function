@@ -8,7 +8,8 @@
 module LocalCooking.Function.Semantics where
 
 import LocalCooking.Semantics.Tag (TagExists (..))
-import LocalCooking.Semantics.Mitch (MealExists (..), MenuExists (..), ChefExists (..))
+import LocalCooking.Semantics.Mitch
+  (MealExists (..), MenuExists (..), ChefExists (..), CustomerExists (..))
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.Tag.Ingredient (IngredientTag)
@@ -227,15 +228,15 @@ assignDiets custId customerDiets = do
     insert_ (StoredDietPreference custId d)
 
 
-getCustDiets :: StoredCustomerId -> ReaderT SqlBackend IO (Maybe [DietTag])
+getCustDiets :: StoredCustomerId -> ReaderT SqlBackend IO (CustomerExists [DietTag])
 getCustDiets custId = do
   mCust <- get custId
   case mCust of
-    Nothing -> pure Nothing
+    Nothing -> pure CustomerDoesntExist
     Just _ -> do
       ds <- fmap (fmap (\(Entity _ (StoredDietPreference _ d)) -> d))
           $ selectList [StoredDietPreferenceOwner ==. custId] []
-      fmap (Just . catMaybes) $ forM ds getDietById
+      fmap (CustomerExists . catMaybes) $ forM ds getDietById
 
 
 assignAllergies :: StoredCustomerId -> [IngredientTag] -> ReaderT SqlBackend IO ()
@@ -250,12 +251,13 @@ assignAllergies custId customerAllergies = do
   forM_ toAdd $ \i -> insert_ (StoredAllergy custId i)
 
 
-getCustAllergies :: StoredCustomerId -> ReaderT SqlBackend IO (Maybe [IngredientTag])
+getCustAllergies :: StoredCustomerId
+                 -> ReaderT SqlBackend IO (CustomerExists [IngredientTag])
 getCustAllergies custId = do
   mCust <- get custId
   case mCust of
-    Nothing -> pure Nothing
+    Nothing -> pure CustomerDoesntExist
     Just _ -> do
       ds <- fmap (fmap (\(Entity _ (StoredAllergy _ a)) -> a))
           $ selectList [StoredAllergyOwner ==. custId] []
-      fmap (Just . catMaybes) $ forM ds getIngredientTagById
+      fmap (CustomerExists . catMaybes) $ forM ds getIngredientTagById

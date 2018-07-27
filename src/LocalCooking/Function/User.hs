@@ -28,14 +28,14 @@ getUserId authToken = do
 
 verifyRole :: UserRole
            -> AuthToken
-           -> SystemM (StoredUserId -> a)
+           -> (StoredUserId -> SystemM a)
            -> SystemM (UserExists (HasRole a))
-verifyRole role authToken fX = do
+verifyRole role authToken f = do
   mUserId <- getUserId authToken
   case mUserId of
     UserExists userId -> fmap UserExists $ do
       isEditor <- liftDb (hasRole userId role)
       if not isEditor
         then pure DoesntHaveRole
-        else (\f -> HasRole $ f userId) <$> fX
+        else HasRole <$> f userId
     UserDoesntExist -> pure UserDoesntExist
