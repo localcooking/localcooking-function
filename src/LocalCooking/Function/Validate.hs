@@ -60,12 +60,11 @@ passwordVerify authToken pw = do
   mUserId <- getUserId authToken
   case mUserId of
     UserDoesntExist -> pure UserDoesntExist
-    UserExists userId -> fmap UserExists $ do
-      liftDb $ do
-        mUser <- get userId
-        case mUser of
-          Nothing -> pure False
-          Just (StoredUser _ _ pw' _) -> pure (pw == pw')
+    UserExists userId -> liftDb $ do
+      mUser <- get userId
+      case mUser of
+        Nothing -> pure UserDoesntExist
+        Just (StoredUser _ _ pw' _) -> pure (UserExists (pw == pw'))
 
 
 passwordVerifyUnauth :: EmailAddress -> HashedPassword -> ReaderT SqlBackend IO (UserExists Bool)
