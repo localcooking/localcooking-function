@@ -25,10 +25,12 @@ import LocalCooking.Semantics.Mitch
   , Order (..), CartEntry (..)
   , getReviewSynopsis
   , CustomerExists (..), ReviewExists (..), OrderExists (..), MealExists (..)
-  , MenuExists (..), ChefExists (..), ChefUnique (..), CustomerUnique (..)
+  , MenuExists (..), CustomerUnique (..)
   , MealUnique (..), MenuUnique (..), MenuPublished (..), RatingExists (..)
   , menuExistsToMaybe, mealExistsToMaybe, ratingExistsToMaybe, reviewExistsToMaybe
   )
+import LocalCooking.Semantics.Chef
+  ( ChefExists (..), ChefUnique (..))
 import LocalCooking.Semantics.User
   ( UserExists (..), HasRole (..))
 import LocalCooking.Semantics.Tag
@@ -128,6 +130,7 @@ getCustomer authToken = do
             address
 
 
+-- FIXME align with authentication policy
 -- | Physically store the content of a `CustomerValid` data-view into the database
 unsafeStoreCustomer :: StoredUserId -> CustomerValid -> SystemM ()
 unsafeStoreCustomer userId CustomerValid{..} = do

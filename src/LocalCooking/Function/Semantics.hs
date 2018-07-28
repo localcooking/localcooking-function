@@ -9,7 +9,8 @@ module LocalCooking.Function.Semantics where
 
 import LocalCooking.Semantics.Tag (TagExists (..))
 import LocalCooking.Semantics.Mitch
-  (MealExists (..), MenuExists (..), ChefExists (..), CustomerExists (..))
+  (MealExists (..), MenuExists (..), CustomerExists (..))
+import LocalCooking.Semantics.Chef (ChefExists (..))
 import LocalCooking.Common.Tag.Meal (MealTag)
 import LocalCooking.Common.Tag.Chef (ChefTag)
 import LocalCooking.Common.Tag.Ingredient (IngredientTag)
