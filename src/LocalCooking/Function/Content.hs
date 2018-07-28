@@ -89,22 +89,23 @@ validateEditor SetEditor{..} = do
 
 
 getEditor :: AuthToken -> SystemM (UserExists (HasRole (Maybe GetEditor)))
-getEditor authToken = verifyRole EditorRole authToken $ \userId -> liftDb $ do
-  mCustEnt <- getBy (UniqueEditor userId)
-  case mCustEnt of
-    Nothing -> pure Nothing
-    Just (Entity editorId (StoredEditor _ name)) -> do
-      variants <- do
-        xs <- selectList [RecordAssignedSubmissionPolicyEditor ==. editorId] []
-        fmap catMaybes $ forM xs $ \(Entity _ (RecordAssignedSubmissionPolicy policyId _)) -> do
-          mPolicy <- get policyId
-          case mPolicy of
-            Nothing -> pure Nothing
-            Just (RecordSubmissionPolicy v _) -> pure (Just v)
-      approved <- do
-        xs <- selectList [RecordSubmissionApprovalEditor ==. editorId] []
-        forM xs $ \(Entity approvalId _) -> pure approvalId
-      pure $ Just $ GetEditor name variants approved
+getEditor authToken =
+  verifyRole Editor authToken $ \userId -> liftDb $ do
+    mCustEnt <- getBy (UniqueEditor userId)
+    case mCustEnt of
+      Nothing -> pure Nothing
+      Just (Entity editorId (StoredEditor _ name)) -> do
+        variants <- do
+          xs <- selectList [RecordAssignedSubmissionPolicyEditor ==. editorId] []
+          fmap catMaybes $ forM xs $ \(Entity _ (RecordAssignedSubmissionPolicy policyId _)) -> do
+            mPolicy <- get policyId
+            case mPolicy of
+              Nothing -> pure Nothing
+              Just (RecordSubmissionPolicy v _) -> pure (Just v)
+        approved <- do
+          xs <- selectList [RecordSubmissionApprovalEditor ==. editorId] []
+          forM xs $ \(Entity approvalId _) -> pure approvalId
+        pure $ Just $ GetEditor name variants approved
 
 
 unsafeStoreEditor :: StoredUserId -> EditorValid -> ReaderT SqlBackend IO ()
@@ -118,11 +119,12 @@ unsafeStoreEditor userId EditorValid{..} = do
 
 
 setEditor :: AuthToken -> SetEditor -> SystemM (UserExists (HasRole JSONUnit))
-setEditor authToken setEditor' = verifyRole EditorRole authToken $ \userId -> liftDb $ do
-  now <- liftIO getCurrentTime
-  let record = ProfileRecord (ProfileRecordEditor setEditor')
-  insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
-  pure JSONUnit
+setEditor authToken setEditor' =
+  verifyRole Editor authToken $ \userId -> liftDb $ do
+    now <- liftIO getCurrentTime
+    let record = ProfileRecord (ProfileRecordEditor setEditor')
+    insert_ $ StoredRecordSubmission userId now record (contentRecordVariant record)
+    pure JSONUnit
 
 
 getSubmissionPolicy :: AuthToken
@@ -131,15 +133,16 @@ getSubmissionPolicy :: AuthToken
                        ( UserExists
                          ( HasRole
                            ( SubmissionPolicy GetRecordSubmissionPolicy)))
-getSubmissionPolicy authToken variant = verifyRole EditorRole authToken $ \_ -> liftDb $ do
-  mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
-  case mPolicy of
-    Nothing -> pure NoSubmissionPolicy
-    Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
-      assigned <- do
-        xs <- selectList [RecordAssignedSubmissionPolicyPolicy ==. policyId] []
-        pure $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
-      pure $ SubmissionPolicy $ GetRecordSubmissionPolicy variant additional assigned
+getSubmissionPolicy authToken variant =
+  verifyRole Editor authToken $ \_ -> liftDb $ do
+    mPolicy <- getBy (UniqueSubmissionPolicyVariant variant)
+    case mPolicy of
+      Nothing -> pure NoSubmissionPolicy
+      Just (Entity policyId (RecordSubmissionPolicy _ additional)) -> do
+        assigned <- do
+          xs <- selectList [RecordAssignedSubmissionPolicyPolicy ==. policyId] []
+          pure $ (\(Entity _ (RecordAssignedSubmissionPolicy _ e)) -> e) <$> xs
+        pure $ SubmissionPolicy $ GetRecordSubmissionPolicy variant additional assigned
 
 
 isApprovedSubmission :: AuthToken
@@ -150,7 +153,7 @@ isApprovedSubmission :: AuthToken
                             ( SubmissionExists
                               ( SubmissionPolicy Bool))))
 isApprovedSubmission authToken submissionId =
-  verifyRole EditorRole authToken $ \_ -> liftDb $ do
+  verifyRole Editor authToken $ \_ -> liftDb $ do
     mSubmission <- get submissionId
     case mSubmission of
       Nothing -> pure SubmissionDoesntExist
@@ -181,66 +184,74 @@ integrateRecord :: AuthToken
 integrateRecord authToken submissionId = do
   mIsVerified <- isApprovedSubmission authToken submissionId
   case mIsVerified of
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists DoesntHaveRole -> pure $ UserExists DoesntHaveRole
+    UserExists (HasRole SubmissionDoesntExist) ->
+      pure $ UserExists $ HasRole SubmissionDoesntExist
+    UserExists (HasRole (SubmissionExists NoSubmissionPolicy)) ->
+      pure $ UserExists $ HasRole $ SubmissionExists NoSubmissionPolicy
     UserExists (HasRole (SubmissionExists (SubmissionPolicy isVerified))) ->
-      fmap (UserExists . HasRole . SubmissionExists . SubmissionPolicy) $
-        if not isVerified
-          then pure False
-          else do
-            mUserRec <- liftDb $ do
-              mSub <- get submissionId
-              case mSub of
-                Nothing -> pure Nothing
-                Just (StoredRecordSubmission author _ record _) -> pure $ Just (author, record)
-            case mUserRec of
-              Nothing -> pure False
-              Just (userId, record) -> do
-                case record of
-                  TagRecord tagRecord -> case tagRecord of
-                    TagRecordChef chefTag             -> unsafeStoreChefTag chefTag
-                    TagRecordCulture cultureTag       -> unsafeStoreCultureTag cultureTag
-                    TagRecordDiet dietTag             -> unsafeStoreDietTag dietTag
-                    TagRecordFarm farmTag             -> unsafeStoreFarmTag farmTag
-                    TagRecordIngredient ingredientTag -> unsafeStoreIngredientTag ingredientTag
-                    TagRecordMeal mealTag             -> unsafeStoreMealTag mealTag
-                  ChefRecord chefRecord -> case chefRecord of
-                    ChefRecordNewMenu newMenu -> void $ unsafeStoreNewMenu userId newMenu
-                    ChefRecordSetMenu setMenu -> void $ unsafeStoreSetMenu userId setMenu
-                    ChefRecordNewMeal newMeal -> void $ unsafeStoreNewMeal userId newMeal
-                    ChefRecordSetMeal setMeal -> void $ unsafeStoreSetMeal userId setMeal
-                  ProfileRecord profileRecord -> case profileRecord of
-                    ProfileRecordChef setChef -> do
-                      mChefValid <- liftDb $ validateChef setChef
-                      case mChefValid of
-                        Left _ -> pure () -- FIXME error somehow?
-                        Right chefValid -> void $ unsafeStoreChef userId chefValid
-                    ProfileRecordCustomer setCustomer -> do
-                      mCustomerValid <- liftDb $ validateCustomer setCustomer
-                      case mCustomerValid of
-                        Left _ -> pure () -- FIXME error somehow?
-                        Right customerValid -> void $ unsafeStoreCustomer userId customerValid
-                    ProfileRecordEditor setEditor -> do
-                      mEditorValid <- liftDb $ validateEditor setEditor
-                      case mEditorValid of
-                        Left _ -> pure () -- FIXME error somehow?
-                        Right editorValid -> void $ unsafeStoreEditor userId editorValid
-                liftDb $ delete submissionId
-                pure True
+      if not isVerified
+        then pure $ UserExists $ HasRole $ SubmissionExists $ SubmissionPolicy False
+        else do
+          mUserRec <- liftDb $ do
+            mSub <- get submissionId
+            case mSub of
+              Nothing -> pure $ UserExists $ HasRole SubmissionDoesntExist
+              Just (StoredRecordSubmission author _ record _) ->
+                pure $ UserExists $ HasRole $ SubmissionExists (author, record)
+          case mUserRec of
+            UserDoesntExist -> pure UserDoesntExist
+            UserExists DoesntHaveRole -> pure $ UserExists DoesntHaveRole
+            UserExists (HasRole SubmissionDoesntExist) ->
+              pure $ UserExists $ HasRole SubmissionDoesntExist
+            UserExists (HasRole (SubmissionExists (userId, record))) -> do
+              case record of
+                TagRecord tagRecord -> case tagRecord of
+                  TagRecordChef chefTag             -> unsafeStoreChefTag chefTag
+                  TagRecordCulture cultureTag       -> unsafeStoreCultureTag cultureTag
+                  TagRecordDiet dietTag             -> unsafeStoreDietTag dietTag
+                  TagRecordFarm farmTag             -> unsafeStoreFarmTag farmTag
+                  TagRecordIngredient ingredientTag -> unsafeStoreIngredientTag ingredientTag
+                  TagRecordMeal mealTag             -> unsafeStoreMealTag mealTag
+                ChefRecord chefRecord -> case chefRecord of
+                  ChefRecordNewMenu newMenu -> void $ unsafeStoreNewMenu userId newMenu
+                  ChefRecordSetMenu setMenu -> void $ unsafeStoreSetMenu userId setMenu
+                  ChefRecordNewMeal newMeal -> void $ unsafeStoreNewMeal userId newMeal
+                  ChefRecordSetMeal setMeal -> void $ unsafeStoreSetMeal userId setMeal
+                ProfileRecord profileRecord -> case profileRecord of
+                  ProfileRecordChef setChef -> do
+                    mChefValid <- liftDb $ validateChef setChef
+                    case mChefValid of
+                      Left _ -> pure () -- FIXME error somehow?
+                      Right chefValid -> void $ unsafeStoreChef userId chefValid
+                  ProfileRecordCustomer setCustomer -> do
+                    mCustomerValid <- liftDb $ validateCustomer setCustomer
+                    case mCustomerValid of
+                      Left _ -> pure () -- FIXME error somehow?
+                      Right customerValid -> void $ unsafeStoreCustomer userId customerValid
+                  ProfileRecordEditor setEditor -> do
+                    mEditorValid <- liftDb $ validateEditor setEditor
+                    case mEditorValid of
+                      Left _ -> pure () -- FIXME error somehow?
+                      Right editorValid -> void $ liftDb $ unsafeStoreEditor userId editorValid
+              liftDb $ delete submissionId
+              pure $ UserExists $ HasRole $ SubmissionExists $ SubmissionPolicy True
 
 
-
-getSubmissions :: AuthToken -> ContentRecordVariant -> SystemM (Maybe [JSONTuple StoredRecordSubmissionId GetRecordSubmission])
+getSubmissions :: AuthToken
+               -> ContentRecordVariant
+               -> SystemM
+                  ( UserExists
+                    ( HasRole [JSONTuple StoredRecordSubmissionId GetRecordSubmission]))
 getSubmissions authToken variant = do
-  mEditor <- verifyEditorhood authToken
-  case mEditor of
-    Nothing -> pure Nothing
-    Just _ -> do
-      liftDb $ do
-        xs <- selectList [StoredRecordSubmissionVariant ==. variant] []
-        fmap Just $ forM xs $ \(Entity submissionId (StoredRecordSubmission author timestamp content _)) -> do
-          approvals <- do
-            ys <- selectList [RecordSubmissionApprovalRecord ==. submissionId] []
-            pure $ (\(Entity _ (RecordSubmissionApproval _ e)) -> e) <$> ys
-          pure $ JSONTuple submissionId $ GetRecordSubmission author timestamp content approvals
+  verifyRole Editor authToken $ \_ -> liftDb $ do
+    xs <- selectList [StoredRecordSubmissionVariant ==. variant] []
+    forM xs $ \(Entity submissionId (StoredRecordSubmission author timestamp content _)) -> do
+      approvals <- do
+        ys <- selectList [RecordSubmissionApprovalRecord ==. submissionId] []
+        pure $ (\(Entity _ (RecordSubmissionApproval _ e)) -> e) <$> ys
+      pure $ JSONTuple submissionId $ GetRecordSubmission author timestamp content approvals
 
 
 
