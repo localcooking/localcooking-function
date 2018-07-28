@@ -18,9 +18,11 @@ import LocalCooking.Function.Mitch
   ( unsafeStoreCustomer, validateCustomer
   )
 import LocalCooking.Function.System (SystemM, SystemEnv (..), getSystemEnv, liftDb)
+import LocalCooking.Function.User (getUserId, verifyRole)
 import LocalCooking.Semantics.Content
   ( SetEditor (..), EditorValid (..), GetRecordSubmissionPolicy (..)
-  , SubmissionPolicy (..), SubmissionExists (..))
+  , SubmissionPolicy (..), SubmissionExists (..), EditorExists (..))
+import LocalCooking.Semantics.User (UserExists (..), HasRole (..))
 import LocalCooking.Semantics.Content.Approval
   ( GetEditor (..), GetRecordSubmission (..))
 import LocalCooking.Semantics.ContentRecord
@@ -62,6 +64,7 @@ import qualified Data.Text as T
 import Data.Monoid ((<>))
 import Data.Time (getCurrentTime)
 import Data.Aeson.JSONTuple (JSONTuple (..))
+import Data.Aeson.JSONUnit (JSONUnit (..))
 import Control.Monad (forM, void)
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -241,43 +244,42 @@ getSubmissions authToken variant = do
 
 
 
-approveSubmission :: AuthToken -> StoredRecordSubmissionId -> SystemM Bool
+approveSubmission :: AuthToken
+                  -> StoredRecordSubmissionId
+                  -> SystemM
+                     ( UserExists
+                       ( HasRole
+                         ( EditorExists
+                           ( SubmissionExists
+                             ( SubmissionPolicy JSONUnit)))))
 approveSubmission authToken submissionId = do
-  mEditor <- verifyEditorhood authToken
-  case mEditor of
-    Nothing -> pure False
-    Just editorId -> do
-      mVariant <- liftDb $ do
-        mSubmission <- get submissionId
+  mVariant <- verifyRole Editor authToken $ \userId -> do
+    mEditor <- liftDb $ getBy (UniqueEditor userId)
+    case mEditor of
+      Nothing -> pure EditorDoesntExist
+      Just (Entity editorId _) -> fmap EditorExists $ do
+        mSubmission <- liftDb $ get submissionId
         case mSubmission of
-          Nothing -> pure Nothing
-          Just (StoredRecordSubmission _ _ _ variant) -> do
-            pure $ Just variant
-      case mVariant of
-        Nothing -> pure False
-        Just variant -> do
-          mPolicy <- getSubmissionPolicy authToken variant
-          case mPolicy of
-            Nothing -> pure False
-            Just _ -> do
-              liftDb $ insert_ $ RecordSubmissionApproval submissionId editorId
-              void (integrateRecord authToken submissionId)
-              pure True
+          Nothing -> pure SubmissionDoesntExist
+          Just (StoredRecordSubmission _ _ _ variant) ->
+            pure $ SubmissionExists (variant, editorId)
+  case mVariant of
+    UserDoesntExist -> pure UserDoesntExist
+    UserExists DoesntHaveRole -> pure (UserExists DoesntHaveRole)
+    UserExists (HasRole EditorDoesntExist) ->
+      pure $ UserExists $ HasRole EditorDoesntExist
+    UserExists (HasRole (EditorExists SubmissionDoesntExist)) ->
+      pure $ UserExists $ HasRole $ EditorExists SubmissionDoesntExist
+    UserExists (HasRole (EditorExists (SubmissionExists (variant, editorId)))) -> do
+      mPolicy <- getSubmissionPolicy authToken variant
+      case mPolicy of
+        UserDoesntExist -> pure UserDoesntExist
+        UserExists DoesntHaveRole -> pure (UserExists DoesntHaveRole)
+        UserExists (HasRole NoSubmissionPolicy) ->
+          pure $ UserExists $ HasRole $ EditorExists $ SubmissionExists $ NoSubmissionPolicy
+        UserExists (HasRole (SubmissionPolicy _)) ->
+          fmap (UserExists . HasRole . EditorExists . SubmissionExists . SubmissionPolicy) $ do
+            liftDb $ insert_ $ RecordSubmissionApproval submissionId editorId
+            void (integrateRecord authToken submissionId)
+            pure JSONUnit
 
-
-
-verifyEditorhood :: AuthToken -> SystemM (Maybe StoredEditorId)
-verifyEditorhood authToken = do
-  mUserId <- getUserId authToken
-  case mUserId of
-    Nothing -> pure Nothing
-    Just userId -> do
-      liftDb $ do
-        isEditor <- hasRole userId Editor
-        if not isEditor
-          then pure Nothing
-          else do
-            mEnt <- getBy (UniqueEditor userId)
-            case mEnt of
-              Nothing -> pure Nothing
-              Just (Entity editorId _) -> pure (Just editorId)
