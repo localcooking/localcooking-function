@@ -179,64 +179,24 @@ assignChefTags = assignTags
   UniqueChefTag
   (\(ChefTagRelation _ t) -> t)
   ChefTagRelation
--- assignChefTags chefId chefSettingsTags = do
-  -- oldTags <- fmap (fmap (\(Entity _ (ChefTagRelation _ t)) -> t))
-  --           $ selectList [ChefTagRelationChef ==. chefId] []
-  -- newTags <- fmap catMaybes $ forM chefSettingsTags $ \t -> do
-  --   mStoredTag <- getBy (UniqueStoredChefTag t)
-  --   case mStoredTag of
-  --     Nothing -> pure Nothing
-  --     Just (Entity j _) -> pure (Just j)
-
-  -- let toRemove, toAdd :: Set.Set StoredChefTagId
-  --     toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
-  --     toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
-
-  -- forM_ toRemove $ \t ->
-  --   deleteBy (UniqueChefTag chefId t)
-  -- forM_ toAdd $ \t ->
-  --   insert_ (ChefTagRelation chefId t)
-
 
 
 assignMenuTags :: StoredMenuId -> [MealTag] -> ReaderT SqlBackend IO ()
-assignMenuTags menuId menuSettingsTags = do
-  oldTags <- fmap (fmap (\(Entity _ (MenuTagRelation _ t)) -> t))
-            $ selectList [MenuTagRelationMenu ==. menuId] []
-  newTags <- fmap catMaybes $ forM menuSettingsTags $ \t -> do
-    mStoredTag <- getBy (UniqueStoredMealTag t)
-    case mStoredTag of
-      Nothing -> pure Nothing
-      Just (Entity j _) -> pure (Just j)
-
-  let toRemove, toAdd :: Set.Set StoredMealTagId
-      toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
-      toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
-
-  forM_ toRemove $ \t ->
-    deleteBy (UniqueMenuTag menuId t)
-  forM_ toAdd $ \t ->
-    insert_ (MenuTagRelation menuId t)
+assignMenuTags = assignTags
+  MenuTagRelationMenu
+  UniqueStoredMealTag
+  UniqueMenuTag
+  (\(MenuTagRelation _ t) -> t)
+  MenuTagRelation
 
 
 assignMealTags :: StoredMealId -> [MealTag] -> ReaderT SqlBackend IO ()
-assignMealTags mealId mealSettingsTags = do
-  oldTags <- fmap (fmap (\(Entity _ (MealTagRelation _ t)) -> t))
-            $ selectList [MealTagRelationMeal ==. mealId] []
-  newTags <- fmap catMaybes $ forM mealSettingsTags $ \t -> do
-    mStoredTag <- getBy (UniqueStoredMealTag t)
-    case mStoredTag of
-      Nothing -> pure Nothing
-      Just (Entity j _) -> pure (Just j)
-
-  let toRemove, toAdd :: Set.Set StoredMealTagId
-      toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
-      toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
-
-  forM_ toRemove $ \t ->
-    deleteBy (UniqueMealTag mealId t)
-  forM_ toAdd $ \t ->
-    insert_ (MealTagRelation mealId t)
+assignMealTags = assignTags
+  MealTagRelationMeal
+  UniqueStoredMealTag
+  UniqueMealTag
+  (\(MealTagRelation _ t) -> t)
+  MealTagRelation
 
 
 
