@@ -3,6 +3,7 @@
   , ScopedTypeVariables
   , GADTs
   , RankNTypes
+  , PartialTypeSignatures
   #-}
 
 module LocalCooking.Function.Semantics where
@@ -136,25 +137,65 @@ getChefTags =
 
 
 
-
-assignChefTags :: StoredChefId -> [ChefTag] -> ReaderT SqlBackend IO ()
-assignChefTags chefId chefSettingsTags = do
-  oldTags <- fmap (fmap (\(Entity _ (ChefTagRelation _ t)) -> t))
-            $ selectList [ChefTagRelationChef ==. chefId] []
-  newTags <- fmap catMaybes $ forM chefSettingsTags $ \t -> do
-    mStoredTag <- getBy (UniqueStoredChefTag t)
+assignTags :: forall storedRelation storedContent storedTag tag
+            . PersistEntityBackend storedRelation ~ PersistEntityBackend storedContent
+           => PersistEntityBackend storedRelation ~ PersistEntityBackend storedTag
+           => PersistEntityBackend storedRelation ~ SqlBackend
+           => PersistEntity storedRelation
+           => PersistEntity storedContent
+           => PersistEntity storedTag
+           => EntityField storedRelation (Key storedContent)
+           -> (tag -> Unique storedTag)
+           -> (Key storedContent -> Key storedTag -> Unique storedRelation)
+           -> (storedRelation -> Key storedTag)
+           -> (Key storedContent -> Key storedTag -> storedRelation)
+           -> Key storedContent
+           -> [tag]
+           -> ReaderT SqlBackend IO ()
+assignTags field uniqueStoredTag uniqueTag getTagId mkRelation chefId tags = do
+  oldTags <- fmap (fmap (\(Entity _ x) -> getTagId x))
+            $ selectList [field ==. chefId] []
+  newTags <- fmap catMaybes $ forM tags $ \t -> do
+    mStoredTag <- getBy (uniqueStoredTag t)
     case mStoredTag of
       Nothing -> pure Nothing
       Just (Entity j _) -> pure (Just j)
 
-  let toRemove, toAdd :: Set.Set StoredChefTagId
+  let toRemove, toAdd :: Set.Set (Key storedTag) -- StoredChefTagId
       toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
       toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
 
   forM_ toRemove $ \t ->
-    deleteBy (UniqueChefTag chefId t)
+    deleteBy (uniqueTag chefId t)
   forM_ toAdd $ \t ->
-    insert_ (ChefTagRelation chefId t)
+    insert_ (mkRelation chefId t)
+
+
+
+assignChefTags :: StoredChefId -> [ChefTag] -> ReaderT SqlBackend IO ()
+assignChefTags = assignTags
+  ChefTagRelationChef
+  UniqueStoredChefTag
+  UniqueChefTag
+  (\(ChefTagRelation _ t) -> t)
+  ChefTagRelation
+-- assignChefTags chefId chefSettingsTags = do
+  -- oldTags <- fmap (fmap (\(Entity _ (ChefTagRelation _ t)) -> t))
+  --           $ selectList [ChefTagRelationChef ==. chefId] []
+  -- newTags <- fmap catMaybes $ forM chefSettingsTags $ \t -> do
+  --   mStoredTag <- getBy (UniqueStoredChefTag t)
+  --   case mStoredTag of
+  --     Nothing -> pure Nothing
+  --     Just (Entity j _) -> pure (Just j)
+
+  -- let toRemove, toAdd :: Set.Set StoredChefTagId
+  --     toRemove = Set.fromList oldTags `Set.difference` Set.fromList newTags
+  --     toAdd = Set.fromList newTags `Set.difference` Set.fromList oldTags
+
+  -- forM_ toRemove $ \t ->
+  --   deleteBy (UniqueChefTag chefId t)
+  -- forM_ toAdd $ \t ->
+  --   insert_ (ChefTagRelation chefId t)
 
 
 
