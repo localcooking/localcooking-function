@@ -17,15 +17,17 @@ module LocalCooking.Function.Blog
   ) where
 
 import LocalCooking.Function.System
-  (SystemM, SystemEnv (..), getUserId, getSystemEnv, liftDb)
+  (SystemM, SystemEnv (..), getSystemEnv, liftDb)
+import LocalCooking.Function.User (getUserId, verifyRole)
 import LocalCooking.Semantics.Blog
   ( GetBlogPost (GetBlogPost), NewBlogPost (NewBlogPost), SetBlogPost (SetBlogPost)
   , BlogPostSynopsis (..), BlogPostCategorySynopsis (..), GetBlogPostCategory (..)
   , SetBlogPostCategory (..), NewBlogPostCategory (..)
   , BlogPostCategoryExists (..), BlogPostCategoryUnique (..), BlogPostExists (..)
-  , BlogPostUnique (..)
+  , BlogPostUnique (..), BlogPostPrimary (..)
   )
 import qualified LocalCooking.Semantics.Blog as Blog
+import LocalCooking.Semantics.User (HasRole (..), UserExists (..))
 import LocalCooking.Semantics.Content (EditorExists (..))
 import LocalCooking.Common.AccessToken.Auth (AuthToken)
 import LocalCooking.Common.User.Role (UserRole (Editor))
@@ -52,6 +54,7 @@ import Data.Maybe (catMaybes)
 import Data.Time (getCurrentTime)
 import Data.Text.Permalink (Permalink)
 import Data.Aeson.JSONTuple (JSONTuple (..))
+import Data.Aeson.JSONUnit (JSONUnit (..))
 import Control.Monad (forM)
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.IO.Class (MonadIO (liftIO))
@@ -73,7 +76,10 @@ getBlogPostCategories variant = do
   pure $ (\(Entity _ (StoredBlogPostCategory name priority permalink _)) ->
             BlogPostCategorySynopsis name permalink priority) <$> xs
 
-getBlogPostCategory :: BlogPostVariant -> Permalink -> ReaderT SqlBackend IO (BlogPostCategoryUnique GetBlogPostCategory)
+getBlogPostCategory :: BlogPostVariant
+                    -> Permalink
+                    -> ReaderT SqlBackend IO
+                       (BlogPostCategoryUnique GetBlogPostCategory)
 getBlogPostCategory variant permalink = do
   mEnt <- getBy (UniqueBlogPostCategory variant permalink)
   case mEnt of
@@ -97,7 +103,7 @@ newBlogPostCategory :: AuthToken
                          ( HasRole
                            ( BlogPostCategoryUnique StoredBlogPostCategoryId)))
 newBlogPostCategory authToken NewBlogPostCategory{..} =
-  verifyRole EditorRole authToken $ \userId -> liftDb $ do
+  verifyRole Editor authToken $ \userId -> liftDb $ do
     mEnt <- getBy (UniqueBlogPostCategory newBlogPostCategoryVariant newBlogPostCategoryPermalink)
     case mEnt of
       Just _ -> pure BlogPostCategoryNotUnique
@@ -116,7 +122,7 @@ setBlogPostCategory :: AuthToken
                            ( BlogPostCategoryExists
                              ( BlogPostCategoryUnique JSONUnit))))
 setBlogPostCategory authToken SetBlogPostCategory{..} = do
-  verifyRole EditorRole authToken $ \userId -> liftDb $ do
+  verifyRole Editor authToken $ \userId -> liftDb $ do
     mEnt <- get setBlogPostCategoryId
     case mEnt of
       Nothing -> pure BlogPostCategoryDoesntExist
@@ -125,7 +131,7 @@ setBlogPostCategory authToken SetBlogPostCategory{..} = do
         case mExisting of
           Just _ -> pure BlogPostCategoryNotUnique
           Nothing -> do
-            JSONUnit <$ update setBlogPostCategoryId
+            BlogPostCategoryUnique JSONUnit <$ update setBlogPostCategoryId
               [ StoredBlogPostCategoryName =. setBlogPostCategoryName
               , StoredBlogPostCategoryPriority =. setBlogPostCategoryPriority
               , StoredBlogPostCategoryPermalink =. setBlogPostCategoryPermalink
@@ -188,76 +194,90 @@ getBlogPost (JSONTuple variant (JSONTuple category permalink)) = do
 newBlogPost :: AuthToken
             -> NewBlogPost
             -> SystemM
-               ( BlogPostUnique
-                 ( BlogPostPrimary StoredBlogPostId))
+               ( UserExists
+                 ( HasRole
+                   ( EditorExists
+                     ( BlogPostUnique
+                       ( BlogPostPrimary StoredBlogPostId)))))
 newBlogPost authToken NewBlogPost{..} = do
-  verifyRole EditorRole authToken $ \author -> liftDb $ do
-    mExisting <- getBy (UniqueBlogPost newBlogPostCategory newBlogPostPermalink)
-    case mExisting of
-      Just _ -> pure BlogPostNotUnique
-      Nothing -> fmap BlogPostUnique $ do
-        now <- liftIO getCurrentTime
-        let insertBlogPost = insert $ StoredBlogPost
-              author
-              now
-              newBlogPostHeadline
-              newBlogPostPermalink
-              newBlogPostContent
-              newBlogPostPriority
-              newBlogPostCategory
-        if newBlogPostPrimary
-          then do
-            mPrimary <- getBy (UniquePrimaryBlogPost newBlogPostCategory)
-            case mPrimary of
-              Just _ -> pure BlogPostNotPrimary
-              Nothing -> do
-                postId <- insertBlogPost
-                insert_ (StoredBlogPostPrimary postId newBlogPostCategory)
-                pure (BlogPostPrimary postId)
-          else BlogPostPrimary <$> insertBlogPost
+  verifyRole Editor authToken $ \userId -> liftDb $ do
+    mAuthor <- getBy (UniqueEditor userId)
+    case mAuthor of
+      Nothing -> pure EditorDoesntExist
+      Just (Entity author _) -> fmap EditorExists $ do
+        mExisting <- getBy (UniqueBlogPost newBlogPostCategory newBlogPostPermalink)
+        case mExisting of
+          Just _ -> pure BlogPostNotUnique
+          Nothing -> fmap BlogPostUnique $ do
+            now <- liftIO getCurrentTime
+            let insertBlogPost = insert $ StoredBlogPost
+                  author
+                  now
+                  newBlogPostHeadline
+                  newBlogPostPermalink
+                  newBlogPostContent
+                  newBlogPostPriority
+                  newBlogPostCategory
+            if newBlogPostPrimary
+              then do
+                mPrimary <- getBy (UniquePrimaryBlogPost newBlogPostCategory)
+                case mPrimary of
+                  Just _ -> pure BlogPostNotPrimary
+                  Nothing -> do
+                    postId <- insertBlogPost
+                    insert_ (StoredBlogPostPrimary postId newBlogPostCategory)
+                    pure (BlogPostPrimary postId)
+              else BlogPostPrimary <$> insertBlogPost
 
 
 setBlogPost :: AuthToken
             -> SetBlogPost
             -> SystemM
-               ( BlogPostExists
-                 ( BlogPostPrimary
-                   ( BlogPostUnique JSONUnit)))
+               ( UserExists
+                 ( HasRole
+                   ( EditorExists
+                     ( BlogPostExists
+                       ( BlogPostPrimary
+                         ( BlogPostUnique JSONUnit))))))
 setBlogPost authToken SetBlogPost{..} = do
-  verifyRole EditorRole authToken $ \author -> liftDb $ do
-    mPost <- get setBlogPostId
-    case mPost of
-      Nothing -> pure BlogPostDoesntExist
-      Just (StoredBlogPost _ _ _ _ _ _ category) -> fmap BlogPostExists $ do
-        let updatePost = do
-              mPost <- getBy (UniqueBlogPost category setBlogPostPermalink)
-              case mPost of
-                Just _ -> pure BlogPostNotUnique
-                Nothing -> do
-                  update setBlogPostId
-                    [ StoredBlogPostAuthor =. author
-                    , StoredBlogPostHeadline =. setBlogPostHeadline
-                    , StoredBlogPostPermalink =. setBlogPostPermalink
-                    , StoredBlogPostContent =. setBlogPostContent
-                    , StoredBlogPostPriority =. setBlogPostPriority
-                    ]
-                  pure (BlogPostUnique JSONUnit)
-        if not setBlogPostPrimary
-          then do
-            deleteWhere
-              [ StoredBlogPostPrimaryCategory ==. category
-              , StoredBlogPostPrimaryPost ==. setBlogPostId
-              ]
-            BlogPostPrimary <$> updatePost
-          else do
-            mPrimary <- getBy (UniquePrimaryBlogPost category)
-            case mPrimary of
-              Just (Entity _ (StoredBlogPostPrimary primaryPost _))
-                | primaryPost /= setBlogPostId -> pure BlogPostNotPrimary
-                | otherwise -> BlogPostPrimary <$> updatePost
-              Nothing -> do
-                insert_ (StoredBlogPostPrimary setBlogPostId category)
+  verifyRole Editor authToken $ \userId -> liftDb $ do
+    mAuthor <- getBy (UniqueEditor userId)
+    case mAuthor of
+      Nothing -> pure EditorDoesntExist
+      Just (Entity author _) -> fmap EditorExists $ do
+        mPost <- get setBlogPostId
+        case mPost of
+          Nothing -> pure BlogPostDoesntExist
+          Just (StoredBlogPost _ _ _ _ _ _ category) -> fmap BlogPostExists $ do
+            let updatePost = do
+                  mPost <- getBy (UniqueBlogPost category setBlogPostPermalink)
+                  case mPost of
+                    Just _ -> pure BlogPostNotUnique
+                    Nothing -> do
+                      update setBlogPostId
+                        [ StoredBlogPostAuthor =. author
+                        , StoredBlogPostHeadline =. setBlogPostHeadline
+                        , StoredBlogPostPermalink =. setBlogPostPermalink
+                        , StoredBlogPostContent =. setBlogPostContent
+                        , StoredBlogPostPriority =. setBlogPostPriority
+                        ]
+                      pure (BlogPostUnique JSONUnit)
+            if not setBlogPostPrimary
+              then do
+                deleteWhere
+                  [ StoredBlogPostPrimaryCategory ==. category
+                  , StoredBlogPostPrimaryPost ==. setBlogPostId
+                  ]
                 BlogPostPrimary <$> updatePost
+              else do
+                mPrimary <- getBy (UniquePrimaryBlogPost category)
+                case mPrimary of
+                  Just (Entity _ (StoredBlogPostPrimary primaryPost _))
+                    | primaryPost /= setBlogPostId -> pure BlogPostNotPrimary
+                    | otherwise -> BlogPostPrimary <$> updatePost
+                  Nothing -> do
+                    insert_ (StoredBlogPostPrimary setBlogPostId category)
+                    BlogPostPrimary <$> updatePost
 
 
 -- * Unexposed
