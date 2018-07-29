@@ -42,6 +42,10 @@ packages:
     git: git@git.localcooking.com:private-tooling/emailaddress.git
     commit: d4c426e1a9c6d5b53be4782b072cf0746049bfa7
   extra-dep: true
+- location:
+    git: git@git.localcooking.com:tooling/purescript-iso.git
+    commit: 72d4197bfd36565fa2fce20b65d046b6239a4ee1
+  extra-dep: true
 # Dependency packages to be pulled from upstream that are not in the resolver
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)

@@ -49,6 +49,7 @@ dependencies:
 - newtype
 - persistent
 - persistent-postgresql
+- purescript-iso
 - resourcet
 - resource-pool
 - sphinx
