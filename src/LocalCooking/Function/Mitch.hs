@@ -420,7 +420,8 @@ getMenuMealSynopses menuId = do
 browseChef :: Permalink
            -> SystemM
               ( ChefUnique
-                ( ChefExists (Maybe Chef)))
+                ( ChefExists
+                  ( ReviewExists Chef)))
 browseChef chefPermalink = do
   SystemEnv{systemEnvReviews} <- getSystemEnv
 
@@ -448,9 +449,9 @@ browseChef chefPermalink = do
               ChefExists meals -> fmap ChefExists $ do
                 mReviews <- liftIO (lookupChefReviews systemEnvReviews chefId)
                 case mReviews of
-                  Nothing -> pure Nothing
+                  Nothing -> pure ReviewDoesntExist
                   Just (rating,reviews) ->
-                    pure $ Just Chef
+                    pure $ ReviewExists Chef
                       { chefName = name
                       , chefPermalink = permalink
                       , chefImages = images
