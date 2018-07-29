@@ -88,12 +88,12 @@ validateEditor SetEditor{..} = do
       }
 
 
-getEditor :: AuthToken -> SystemM (UserExists (HasRole (Maybe GetEditor)))
+getEditor :: AuthToken -> SystemM (UserExists (HasRole (EditorExists GetEditor)))
 getEditor authToken =
   verifyRole Editor authToken $ \userId -> liftDb $ do
-    mCustEnt <- getBy (UniqueEditor userId)
-    case mCustEnt of
-      Nothing -> pure Nothing
+    mEditorEnt <- getBy (UniqueEditor userId)
+    case mEditorEnt of
+      Nothing -> pure EditorDoesntExist
       Just (Entity editorId (StoredEditor _ name)) -> do
         variants <- do
           xs <- selectList [RecordAssignedSubmissionPolicyEditor ==. editorId] []
@@ -105,7 +105,7 @@ getEditor authToken =
         approved <- do
           xs <- selectList [RecordSubmissionApprovalEditor ==. editorId] []
           forM xs $ \(Entity approvalId _) -> pure approvalId
-        pure $ Just $ GetEditor name variants approved
+        pure $ EditorExists $ GetEditor name variants approved
 
 
 unsafeStoreEditor :: StoredUserId -> EditorValid -> ReaderT SqlBackend IO ()
